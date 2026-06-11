@@ -74,10 +74,10 @@ function findBackslashAdjustedMatch(
   // If old_string contains sequences like "\\n" that the file doesn't have,
   // try replacing "\\n" → "\n" etc.
   const unescaped = oldString
-    .replace(/\\\\n/g, '\n')
-    .replace(/\\\\t/g, '\t')
-    .replace(/\\\\r/g, '\r')
-    .replace(/\\\\\\\\/g, '\\');
+    .replaceAll('\\n', '\n')
+    .replaceAll('\\t', '\t')
+    .replaceAll('\\r', '\r')
+    .replaceAll('\\\\', '\\');
   if (unescaped !== oldString) {
     variants.push({ adjusted: unescaped, variant: 'unescape-sequences' });
   }
@@ -85,16 +85,16 @@ function findBackslashAdjustedMatch(
   // Variant 2: the LLM under-escaped — the file has literal double-backslash
   // but old_string has single.  Try the reverse.
   const overEscaped = oldString
-    .replace(/\\n/g, '\\n')
-    .replace(/\\t/g, '\\t')
-    .replace(/\\r/g, '\\r');
+    .replaceAll(/\\n/g, '\\n')
+    .replaceAll(/\\t/g, '\\t')
+    .replaceAll(/\\r/g, '\\r');
   // Only try this if it actually changed something and differs from variant 1.
   if (overEscaped !== oldString && overEscaped !== unescaped) {
     variants.push({ adjusted: overEscaped, variant: 'escape-sequences' });
   }
 
   for (const v of variants) {
-    if (content.indexOf(v.adjusted) !== -1) {
+    if (content.includes(v.adjusted)) {
       return v;
     }
   }
@@ -105,7 +105,7 @@ function findBackslashAdjustedMatch(
  * Build a short diagnostic snippet showing the first divergence between
  * `oldString` and the file content, helpful when old_string is not found.
  */
-function buildNotFoundHint(content: string, oldString: string, filePath: string): string {
+function buildNotFoundHint(content: string, oldString: string, _filePath: string): string {
   const lines = content.split('\n');
   const firstLine = oldString.split('\n')[0] ?? '';
   if (firstLine.length === 0) return '';
@@ -177,7 +177,7 @@ export class EditTool implements BuiltinTool<EditInput> {
       // encoding fixes that cover common LLM mis-encodings.
       let oldString = args.old_string;
       let backslashHint: string | undefined;
-      if (content.indexOf(oldString) === -1) {
+      if (!content.includes(oldString)) {
         const adjusted = findBackslashAdjustedMatch(content, oldString);
         if (adjusted !== undefined) {
           oldString = adjusted.adjusted;
