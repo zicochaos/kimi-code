@@ -80,23 +80,19 @@ function findBackslashAdjustedMatch(
   content: string,
   oldString: string,
 ): { adjusted: string; variant: 'unescape' | 'escape' } | undefined {
-  const variants: Array<{ adjusted: string; variant: 'unescape' | 'escape' }> = [];
+  // Check escape first (handles real newlines → backslash-n), then unescape
+  // (handles doubled backslashes → single). Order matters: escape must come
+  // first because unescape would incorrectly match real newlines.
+  const overEscaped = applyBackslashFix(oldString, 'escape');
+  if (overEscaped !== oldString && content.includes(overEscaped)) {
+    return { adjusted: overEscaped, variant: 'escape' };
+  }
 
   const unescaped = applyBackslashFix(oldString, 'unescape');
-  if (unescaped !== oldString) {
-    variants.push({ adjusted: unescaped, variant: 'unescape' });
+  if (unescaped !== oldString && content.includes(unescaped)) {
+    return { adjusted: unescaped, variant: 'unescape' };
   }
 
-  const overEscaped = applyBackslashFix(oldString, 'escape');
-  if (overEscaped !== oldString && overEscaped !== unescaped) {
-    variants.push({ adjusted: overEscaped, variant: 'escape' });
-  }
-
-  for (const v of variants) {
-    if (content.includes(v.adjusted)) {
-      return v;
-    }
-  }
   return undefined;
 }
 
