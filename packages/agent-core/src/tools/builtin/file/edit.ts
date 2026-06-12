@@ -135,7 +135,7 @@ export class EditTool implements BuiltinTool<EditInput> {
     private readonly workspace: WorkspaceConfig,
   ) {}
 
-  async resolveExecution(args: EditInput): Promise<ToolExecution> {
+  resolveExecution(args: EditInput): ToolExecution {
     const path = resolvePathAccessPath(args.path, {
       kaos: this.kaos,
       workspace: this.workspace,
@@ -150,29 +150,9 @@ export class EditTool implements BuiltinTool<EditInput> {
       };
     }
 
-    // Read the file and apply backslash fallback early, so the approval
-    // display shows the exact text that will be written.
-    let adjustedArgs = args;
-    try {
-      const raw = await this.kaos.readText(path);
-      const content = toModelTextView(raw).text;
-      if (!content.includes(args.old_string)) {
-        const adjusted = findBackslashAdjustedMatch(content, args.old_string);
-        if (adjusted !== undefined) {
-          adjustedArgs = {
-            ...args,
-            old_string: adjusted.adjusted,
-            new_string: applyBackslashFix(
-              args.new_string,
-              adjusted.variant as 'escape' | 'collapse-only' | 'unescape-seq-first',
-            ),
-          };
-        }
-      }
-    } catch {
-      // If we can't read the file here, execution() will handle it.
-    }
-
+    // No file read here — resolveExecution runs BEFORE the authorization
+    // hook in tool-call.ts. Reading the file here would bypass permission
+    // checks. The backslash fallback is applied in execution() after auth.
     return {
       accesses: ToolAccesses.readWriteFile(path),
       description: `Editing ${args.path}`,
@@ -180,8 +160,8 @@ export class EditTool implements BuiltinTool<EditInput> {
         kind: 'file_io',
         operation: 'edit',
         path,
-        before: adjustedArgs.old_string,
-        after: adjustedArgs.new_string,
+        before: args.old_string,
+        after: args.new_string,
       },
       approvalRule: literalRulePattern(this.name, path),
       matchesRule: (ruleArgs) =>
@@ -190,7 +170,7 @@ export class EditTool implements BuiltinTool<EditInput> {
           pathClass: this.kaos.pathClass(),
           homeDir: this.kaos.gethome(),
         }),
-      execute: () => this.execution(adjustedArgs, path),
+      execute: () => this.execution(args, path),
     };
   }
 
@@ -201,18 +181,33 @@ export class EditTool implements BuiltinTool<EditInput> {
       const content = modelView.text;
       const replaceAll = args.replace_all ?? false;
 
+      // Apply backslash fallback after auth — adjust both old_string and
+      // new_string with the same transformation so the replacement is correct.
+      let oldString = args.old_string;
+      let newString = args.new_string;
+      if (!content.includes(oldString)) {
+        const adjusted = findBackslashAdjustedMatch(content, oldString);
+        if (adjusted !== undefined) {
+          oldString = adjusted.adjusted;
+          newString = applyBackslashFix(
+            newString,
+            adjusted.variant as 'escape' | 'collapse-only' | 'unescape-seq-first',
+          );
+        }
+      }
+
       if (!replaceAll) {
         let count = 0;
         let pos = 0;
         while (pos < content.length) {
-          const idx = content.indexOf(args.old_string, pos);
+          const idx = content.indexOf(oldString, pos);
           if (idx === -1) break;
           count++;
-          pos = idx + args.old_string.length;
+          pos = idx + oldString.length;
         }
 
         if (count === 0) {
-          const hint = buildNotFoundHint(content, args.old_string, args.path);
+          const hint = buildNotFoundHint(content, oldString, args.path);
           return { isError: true, output: `old_string not found in ${args.path}. ${hint}\nThe file contents may be out of date. Please use the Read Tool to reload the content.
 ` };
         }
@@ -225,7 +220,7 @@ export class EditTool implements BuiltinTool<EditInput> {
           };
         }
 
-        const newContent = replaceOnceLiteral(content, args.old_string, args.new_string);
+        const newContent = replaceOnceLiteral(content, oldString, newString);
         await this.kaos.writeText(
           safePath,
           materializeModelText(newContent, modelView.lineEndingStyle),
@@ -233,15 +228,15 @@ export class EditTool implements BuiltinTool<EditInput> {
         return { output: `Replaced 1 occurrence in ${args.path}` };
       }
 
-      const parts = content.split(args.old_string);
+      const parts = content.split(oldString);
       const replacementCount = parts.length - 1;
       if (replacementCount === 0) {
-        const hint = buildNotFoundHint(content, args.old_string, args.path);
+        const hint = buildNotFoundHint(content, oldString, args.path);
         return { isError: true, output: `old_string not found in ${args.path}. ${hint}\nThe file contents may be out of date. Please use the Read Tool to reload the content.
 ` };
       }
 
-      const newContent = parts.join(args.new_string);
+      const newContent = parts.join(newString);
       await this.kaos.writeText(
         safePath,
         materializeModelText(newContent, modelView.lineEndingStyle),
