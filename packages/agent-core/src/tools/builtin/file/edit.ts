@@ -62,46 +62,38 @@ function replaceOnceLiteral(content: string, oldString: string, newString: strin
  */
 function applyBackslashFix(
   input: string,
-  variant: 'unescape-collapse-first' | 'unescape-seq-first' | 'escape',
+  variant: 'collapse-only' | 'escape' | 'unescape-seq-first',
 ): string {
-  if (variant === 'unescape-collapse-first') {
-    // Collapse doubled backslashes first, then translate escape sequences.
-    // Handles: LLM sent \\n (two backslashes + n) but file has \n (one backslash + n).
-    return input
-      .replaceAll('\\\\', '\\')
-      .replaceAll('\\n', '\n')
-      .replaceAll('\\t', '\t')
-      .replaceAll('\\r', '\r');
+  if (variant === 'collapse-only') {
+    // Only collapse doubled backslashes — no escape sequence processing.
+    // Handles: LLM sent \\\\n (two backslashes + n) but file has \n (one backslash + n).
+    return input.replaceAll('\\\\', '\\');
   }
-  if (variant === 'unescape-seq-first') {
-    // Translate escape sequences first, then collapse doubled backslashes.
-    // Handles: LLM sent \n (real newline) but file has \n (backslash + n).
+  if (variant === 'escape') {
+    // Replace real newlines with backslash-n.
+    // Handles: LLM sent \n (real newline) but file has \\n (two backslashes + n).
     return input
-      .replaceAll('\\n', '\n')
-      .replaceAll('\\t', '\t')
-      .replaceAll('\\r', '\r')
-      .replaceAll('\\\\', '\\');
+      .replaceAll('\n', '\\n')
+      .replaceAll('\t', '\\t')
+      .replaceAll('\r', '\\r');
   }
-  // escape: replace real newlines with backslash-n.
-  // Handles: LLM sent \n (real newline) but file has \\n (two backslashes + n).
+  // unescape-seq-first: translate escape sequences first, then collapse.
+  // Handles: LLM sent \n (real newline) but file has \n (backslash + n).
   return input
-    .replaceAll('\n', '\\n')
-    .replaceAll('\t', '\\t')
-    .replaceAll('\r', '\\r');
+    .replaceAll('\\n', '\n')
+    .replaceAll('\\t', '\t')
+    .replaceAll('\\r', '\r')
+    .replaceAll('\\\\', '\\');
 }
 
 function findBackslashAdjustedMatch(
   content: string,
   oldString: string,
 ): { adjusted: string; variant: string } | undefined {
-  // Try all three variants and return the first that matches the file content.
-  // Each handles a different LLM encoding mistake:
-  //   collapse-first: \\n → \n (double backslash collapsed before escape seq)
-  //   seq-first:      \n → \n (real newline converted before collapse)
-  //   escape:         \n → \\n (real newline re-escaped to backslash-n)
+  // Try all variants and return the first that matches the file content.
   const candidates: Array<{ adjusted: string; variant: string }> = [
+    { adjusted: applyBackslashFix(oldString, 'collapse-only'), variant: 'collapse-only' },
     { adjusted: applyBackslashFix(oldString, 'escape'), variant: 'escape' },
-    { adjusted: applyBackslashFix(oldString, 'unescape-collapse-first'), variant: 'unescape-collapse-first' },
     { adjusted: applyBackslashFix(oldString, 'unescape-seq-first'), variant: 'unescape-seq-first' },
   ];
   for (const c of candidates) {
@@ -193,7 +185,7 @@ export class EditTool implements BuiltinTool<EditInput> {
         const adjusted = findBackslashAdjustedMatch(content, oldString);
         if (adjusted !== undefined) {
           oldString = adjusted.adjusted;
-          newString = applyBackslashFix(newString, adjusted.variant as 'escape' | 'unescape-collapse-first' | 'unescape-seq-first');
+          newString = applyBackslashFix(newString, adjusted.variant as 'escape' | 'collapse-only' | 'unescape-seq-first');
           backslashHint = ` (matched after ${adjusted.variant} adjustment)`;
         }
       }
