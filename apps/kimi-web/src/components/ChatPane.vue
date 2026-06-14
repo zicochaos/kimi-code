@@ -32,6 +32,10 @@ onUnmounted(() => {
     clearTimeout(copiedConversationTimer);
     copiedConversationTimer = null;
   }
+  if (undoTimer !== null) {
+    clearTimeout(undoTimer);
+    undoTimer = null;
+  }
 });
 
 const props = withDefaults(
@@ -165,6 +169,19 @@ const copiedTurn = ref<string | null>(null);
 
 // Undo/edit-and-resend confirmation state (keyed by turn id)
 const confirmingEditTurnId = ref<string | null>(null);
+const undoingTurnId = ref<string | null>(null);
+let undoTimer: ReturnType<typeof setTimeout> | null = null;
+
+function confirmEditMessage(turn: ChatTurn): void {
+  if (undoingTurnId.value !== null) return;
+  confirmingEditTurnId.value = null;
+  undoingTurnId.value = turn.id;
+  undoTimer = setTimeout(() => {
+    undoTimer = null;
+    emit('editMessage', turn.text);
+    undoingTurnId.value = null;
+  }, 240);
+}
 
 // Copy-whole-conversation state
 const copiedConversation = ref(false);
@@ -396,7 +413,7 @@ function renderBlockKey(block: AssistantRenderBlock, index: number): string {
       <!-- User turn → right-aligned soft-blue bubble (undo affordance lives
            outside the bubble with an inline confirm step). -->
       <template v-if="turn.role === 'user'">
-        <div class="u-bub turn-anchor" :data-turn-id="turn.id">
+        <div class="u-bub turn-anchor" :class="{ undoing: undoingTurnId === turn.id }" :data-turn-id="turn.id">
           <!-- Image attachments -->
           <div v-if="turn.images && turn.images.length > 0" class="u-imgs">
             <img
@@ -419,7 +436,7 @@ function renderBlockKey(block: AssistantRenderBlock, index: number): string {
           <!-- User input renders verbatim (pre-wrap), never through Markdown -->
           <div v-else class="u-text">{{ turn.text }}</div>
         </div>
-        <div v-if="canEditTurn(turn)" class="u-edit-wrap">
+        <div v-if="canEditTurn(turn)" class="u-edit-wrap" :class="{ undoing: undoingTurnId === turn.id }">
           <button
             v-if="confirmingEditTurnId !== turn.id"
             type="button"
@@ -438,7 +455,7 @@ function renderBlockKey(block: AssistantRenderBlock, index: number): string {
             <button
               type="button"
               class="u-edit-confirm-btn confirm"
-              @click.stop="emit('editMessage', turn.text); confirmingEditTurnId = null"
+              @click.stop="confirmEditMessage(turn)"
             >
               {{ t('conversation.confirm') }}
             </button>
@@ -553,7 +570,12 @@ function renderBlockKey(block: AssistantRenderBlock, index: number): string {
         <span class="cd-line" aria-hidden="true" />
       </div>
 
-      <div v-else class="ln turn-anchor" :data-turn-id="turn.id" :class="turn.role === 'user' ? 'userline' : 'ai'">
+      <div
+        v-else
+        class="ln turn-anchor"
+        :data-turn-id="turn.id"
+        :class="[turn.role === 'user' ? 'userline' : 'ai', { undoing: undoingTurnId === turn.id }]"
+      >
         <!-- Line-number gutter -->
         <span class="no">{{ turn.no }}</span>
 
@@ -612,6 +634,7 @@ function renderBlockKey(block: AssistantRenderBlock, index: number): string {
         <div
           v-if="turn.role === 'user' && canEditTurn(turn)"
           class="u-edit-wrap ln-edit-wrap"
+          :class="{ undoing: undoingTurnId === turn.id }"
         >
           <button
             v-if="confirmingEditTurnId !== turn.id"
@@ -631,7 +654,7 @@ function renderBlockKey(block: AssistantRenderBlock, index: number): string {
             <button
               type="button"
               class="u-edit-confirm-btn confirm"
-              @click.stop="emit('editMessage', turn.text); confirmingEditTurnId = null"
+              @click.stop="confirmEditMessage(turn)"
             >
               {{ t('conversation.confirm') }}
             </button>
@@ -844,6 +867,43 @@ function renderBlockKey(block: AssistantRenderBlock, index: number): string {
   font-size: 14px;
   line-height: 1.55;
 }
+@keyframes undo-bubble-exit {
+  0% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+  55% {
+    opacity: 0.45;
+    transform: translateX(10px) scale(0.985);
+    filter: blur(0.4px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(28px) scale(0.92);
+    filter: blur(2px);
+  }
+}
+@keyframes undo-line-exit {
+  0% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+}
+.u-bub.undoing {
+  pointer-events: none;
+  transform-origin: right center;
+  animation: undo-bubble-exit 240ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+.ln.userline.undoing {
+  pointer-events: none;
+  transform-origin: right center;
+  animation: undo-line-exit 240ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
 /* User input is shown verbatim — preserve newlines, break long tokens. */
 .u-text {
   white-space: pre-wrap;
@@ -876,6 +936,12 @@ function renderBlockKey(block: AssistantRenderBlock, index: number): string {
 .u-edit:hover { opacity: 1; color: var(--blue); background: var(--hover); }
 /* Mobile bubble layout: right-align the undo button below the bubble. */
 .u-edit-wrap { display: flex; justify-content: flex-end; }
+.u-edit-wrap.undoing {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(12px) scale(0.95);
+  transition: opacity 120ms ease, transform 160ms ease;
+}
 .chat > .u-edit-wrap { margin-top: 4px; }
 .chat > .u-edit-wrap + .a-msg { margin-top: 8px; }
 /* Desktop line layout: place the affordance after the message text with the
