@@ -67,6 +67,7 @@ const ACTIVE_WORKSPACE_KEY = 'kimi-active-workspace';
 const THINKING_STORAGE_KEY = 'kimi-web.thinking';
 const PLAN_MODE_STORAGE_KEY = 'kimi-web.plan-mode';
 const SWARM_MODE_STORAGE_KEY = 'kimi-web.swarm-mode';
+const GOAL_MODE_STORAGE_KEY = 'kimi-web.goal-mode';
 const THEME_STORAGE_KEY = 'kimi-web.theme';
 const UI_FONT_SIZE_STORAGE_KEY = 'kimi-web.ui-font-size';
 const UI_FONT_SIZE_DEFAULT = 14;
@@ -220,6 +221,22 @@ function saveSwarmModeToStorage(v: boolean): void {
   }
 }
 
+function loadGoalModeFromStorage(): boolean {
+  try {
+    return localStorage.getItem(GOAL_MODE_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function saveGoalModeToStorage(v: boolean): void {
+  try {
+    localStorage.setItem(GOAL_MODE_STORAGE_KEY, v ? 'true' : 'false');
+  } catch {
+    // ignore
+  }
+}
+
 function loadThemeFromStorage(): Theme {
   try {
     const v = localStorage.getItem(THEME_STORAGE_KEY);
@@ -352,6 +369,7 @@ interface ExtendedState extends KimiClientState {
   thinking: ThinkingLevel;
   planMode: boolean;
   swarmMode: boolean;
+  goalMode: boolean;
   loading: boolean;
   sessionLoading: boolean;
   queuedBySession: Record<string, QueuedPrompt[]>;
@@ -391,6 +409,7 @@ const rawState: ExtendedState = reactive({
   thinking: loadThinkingFromStorage(),
   planMode: loadPlanModeFromStorage(),
   swarmMode: loadSwarmModeFromStorage(),
+  goalMode: loadGoalModeFromStorage(),
   loading: false,
   sessionLoading: false,
   queuedBySession: {},
@@ -1643,6 +1662,7 @@ const permission = computed<PermissionMode>(() => rawState.permission);
 const thinking = computed<ThinkingLevel>(() => rawState.thinking);
 const planMode = computed<boolean>(() => rawState.planMode);
 const swarmMode = computed<boolean>(() => rawState.swarmMode);
+const goalMode = computed<boolean>(() => rawState.goalMode);
 
 const activationBadges = computed<ActivationBadges>(() => {
   const swarmCounts = countSwarmMembers(swarms.value);
@@ -2588,6 +2608,25 @@ async function submitPromptInternal(sid: string, text: string, attachments?: { f
       (promptSession?.model && promptSession.model.length > 0
         ? promptSession.model
         : rawState.defaultModel) ?? undefined;
+
+    if (rawState.goalMode && text) {
+      try {
+        await api.updateSession(sid, { goalObjective: text.trim() });
+      } catch (err) {
+        pushOperationFailure('createGoal', err, { sessionId: sid });
+        inFlightPromptSessions.delete(sid);
+        rawState.sendingBySession = { ...rawState.sendingBySession, [sid]: false };
+        const msgs = rawState.messagesBySession[sid] ?? [];
+        if (msgs.some((m) => m.id === tempId)) {
+          rawState.messagesBySession = {
+            ...rawState.messagesBySession,
+            [sid]: msgs.filter((m) => m.id !== tempId),
+          };
+        }
+        return false;
+      }
+    }
+
     const result = await api.submitPrompt(sid, {
       content,
       model,
@@ -2596,6 +2635,11 @@ async function submitPromptInternal(sid: string, text: string, attachments?: { f
       planMode: rawState.planMode,
       swarmMode: rawState.swarmMode,
     });
+
+    if (rawState.goalMode) {
+      rawState.goalMode = false;
+      saveGoalModeToStorage(false);
+    }
 
     // Authoritative prompt_id for :abort — race-free (the projector binding can
     // lose to a fast turn.started and synthesize a `pr_…` id the daemon rejects).
@@ -2925,6 +2969,17 @@ function toggleSwarmMode(): void {
     if (!ok) return;
   }
   setSwarmMode(on);
+}
+
+/** Persist goal mode locally. Unlike plan/swarm, this is a one-shot flag consumed on send. */
+function setGoalMode(on: boolean): void {
+  rawState.goalMode = on;
+  saveGoalModeToStorage(on);
+}
+
+/** Flip goal mode on/off. */
+function toggleGoalMode(): void {
+  setGoalMode(!rawState.goalMode);
 }
 
 /** Create a goal by sending its objective to the session profile, then submit it as a prompt. */
@@ -3564,6 +3619,7 @@ export function useKimiWebClient() {
     thinking,
     planMode,
     swarmMode,
+    goalMode,
     queued,
     warnings,
     questions,
@@ -3626,6 +3682,8 @@ export function useKimiWebClient() {
     togglePlanMode,
     setSwarmMode,
     toggleSwarmMode,
+    setGoalMode,
+    toggleGoalMode,
     createGoal,
     controlGoal,
     enqueue,

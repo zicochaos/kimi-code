@@ -49,6 +49,7 @@ const props = defineProps<{
   thinking?: ThinkingLevel;
   planMode?: boolean;
   swarmMode?: boolean;
+  goalMode?: boolean;
   questions?: UIQuestion[];
   running?: boolean;
   queued?: QueuedPromptView[];
@@ -117,6 +118,7 @@ const emit = defineEmits<{
   setThinking: [level: ThinkingLevel];
   togglePlan: [];
   toggleSwarm: [];
+  toggleGoal: [];
   createGoal: [objective: string];
   controlGoal: [action: 'pause' | 'resume' | 'cancel'];
   compact: [];
@@ -714,6 +716,7 @@ function followAfterUserAction(): void {
   showPill.value = false;
   userActionFollowUntil = Date.now() + USER_ACTION_FOLLOW_LOCK_MS;
   void nextTick(() => {
+    scrollToBottom(false);
     scheduleStableFollow(16);
   });
 }
@@ -1098,6 +1101,7 @@ onUnmounted(() => {
             :thinking="thinking"
             :plan-mode="planMode"
             :swarm-mode="swarmMode"
+            :goal-mode="goalMode"
             :activation-badges="activationBadges"
             :models="models"
             :skills="skills"
@@ -1111,6 +1115,7 @@ onUnmounted(() => {
             @set-thinking="emit('setThinking', $event)"
             @toggle-plan="emit('togglePlan')"
             @toggle-swarm="emit('toggleSwarm')"
+            @toggle-goal="emit('toggleGoal')"
             @create-goal="emit('createGoal', $event)"
             @control-goal="emit('controlGoal', $event)"
             @focus-goal="focusGoal"
@@ -1403,6 +1408,7 @@ onUnmounted(() => {
         :thinking="thinking"
         :plan-mode="planMode"
         :swarm-mode="swarmMode"
+        :goal-mode="goalMode"
         :activation-badges="activationBadges"
         :models="models"
         :skills="skills"
@@ -1416,6 +1422,7 @@ onUnmounted(() => {
         @set-thinking="emit('setThinking', $event)"
         @toggle-plan="emit('togglePlan')"
         @toggle-swarm="emit('toggleSwarm')"
+        @toggle-goal="emit('toggleGoal')"
         @create-goal="emit('createGoal', $event)"
         @control-goal="emit('controlGoal', $event)"
         @focus-goal="focusGoal"
@@ -1736,7 +1743,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 2px 2px 9px;
+  padding: 7px 16px 0;
   min-width: 0;
 }
 .dock-work-chip {
@@ -1745,7 +1752,7 @@ onUnmounted(() => {
   gap: 7px;
   min-width: 0;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 8px;
   background: var(--panel);
   color: var(--text);
   padding: 4px 11px;
@@ -1789,10 +1796,10 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   max-height: min(48vh, 320px);
-  margin-bottom: 8px;
+  margin-bottom: 7px;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--bg);
   box-shadow: 0 -8px 30px rgba(0,0,0,0.12);
 }
@@ -1816,7 +1823,7 @@ onUnmounted(() => {
 }
 .dock-work-tab {
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   background: none;
   color: var(--muted);
   padding: 4px 10px;
@@ -1835,7 +1842,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   background: none;
   color: var(--muted);
   padding: 5px;

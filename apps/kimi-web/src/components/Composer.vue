@@ -46,6 +46,7 @@ const props = withDefaults(defineProps<{
   thinking?: ThinkingLevel;
   planMode?: boolean;
   swarmMode?: boolean;
+  goalMode?: boolean;
   activationBadges?: ActivationBadges;
   /** Available models for the quick-switch dropdown. */
   models?: AppModel[];
@@ -60,7 +61,9 @@ const props = withDefaults(defineProps<{
   skills: () => [],
 });
 
-const placeholder = computed(() => t('composer.placeholder'));
+const placeholder = computed(() =>
+  props.goalMode ? t('status.goalPlaceholder') : t('composer.placeholder')
+);
 
 const emit = defineEmits<{
   submit: [payload: { text: string; attachments: { fileId: string }[] }];
@@ -75,6 +78,7 @@ const emit = defineEmits<{
   setThinking: [level: ThinkingLevel];
   togglePlan: [];
   toggleSwarm: [];
+  toggleGoal: [];
   createGoal: [objective: string];
   controlGoal: [action: 'pause' | 'resume' | 'cancel'];
   focusGoal: [];
@@ -792,7 +796,7 @@ function toggleThinking(): void {
 const planOn = computed(() => props.planMode === true);
 const swarmOn = computed(() => props.swarmMode === true);
 const goalActive = computed(() => props.activationBadges?.goal !== null);
-const goalInput = ref('');
+const goalArmed = computed(() => goalActive.value || props.goalMode === true);
 
 // Modes selector (plan / goal / swarm) — the popover that replaces the bare
 // "plan" pill. Plan/Swarm are real client toggles; goal reflects agent-driven
@@ -803,7 +807,7 @@ const modesMenuRef = ref<HTMLElement | null>(null);
 // The menu is position:fixed (so no composer stacking context can paint over
 // it); these coords anchor it just above the pill, computed on open.
 const modesMenuStyle = ref<Record<string, string>>({});
-const anyModeActive = computed(() => planOn.value || swarmOn.value || goalActive.value);
+const anyModeActive = computed(() => planOn.value || swarmOn.value || goalArmed.value);
 function closeModes(): void {
   modesOpen.value = false;
   document.removeEventListener('mousedown', onModesDocClick);
@@ -1091,7 +1095,7 @@ function selectModel(modelId: string): void {
               <span class="mode-label">{{ t('status.modesLabel') }}</span>
               <span v-if="planOn" class="mode-tag">{{ t('status.planLabel') }}</span>
               <span v-if="swarmOn" class="mode-tag">{{ t('status.swarmLabel') }}</span>
-              <span v-if="goalActive" class="mode-tag">{{ t('status.goalLabel') }}</span>
+              <span v-if="goalArmed" class="mode-tag">{{ t('status.goalLabel') }}</span>
             </button>
 
             <div v-if="modesOpen" ref="modesMenuRef" class="modes-menu" :style="modesMenuStyle">
@@ -1105,49 +1109,28 @@ function selectModel(modelId: string): void {
                 <span class="mode-row-name">{{ t('status.swarmLabel') }}</span>
                 <span class="mode-switch" :class="{ on: swarmOn }"><span class="mode-knob" /></span>
               </button>
-              <!-- Goal — input + lifecycle controls -->
-              <div class="mode-row mode-row-goal">
-                <span class="mode-row-name">{{ t('status.goalLabel') }}</span>
-                <template v-if="goalActive">
-                  <div class="mode-row-actions">
-                    <button
-                      type="button"
-                      class="mode-row-action"
-                      @click="emit('controlGoal', 'pause')"
-                    >{{ t('status.goalPause') }}</button>
-                    <button
-                      type="button"
-                      class="mode-row-action"
-                      @click="emit('controlGoal', 'resume')"
-                    >{{ t('status.goalResume') }}</button>
-                    <button
-                      type="button"
-                      class="mode-row-action"
-                      @click="emit('controlGoal', 'cancel')"
-                    >{{ t('status.goalCancel') }}</button>
-                  </div>
-                </template>
-                <template v-else>
-                  <input
-                    v-model="goalInput"
-                    type="text"
-                    class="mode-row-input"
-                    :placeholder="t('status.goalPlaceholder')"
-                    @keydown.enter.prevent="() => {
-                      const o = goalInput.trim();
-                      if (o) { emit('createGoal', o); goalInput = ''; }
-                    }"
-                  />
+              <!-- Goal — lifecycle controls when active; switch is on when active or armed. -->
+              <div class="mode-row mode-row-goal" :class="{ on: goalActive || props.goalMode }">
+                <button
+                  type="button"
+                  class="mode-row-main"
+                  @click="goalActive ? emit('controlGoal', 'cancel') : emit('toggleGoal')"
+                >
+                  <span class="mode-row-name">{{ t('status.goalLabel') }}</span>
+                  <span v-if="!goalActive" class="mode-switch" :class="{ on: props.goalMode }"><span class="mode-knob" /></span>
+                </button>
+                <div v-if="goalActive" class="mode-row-actions">
                   <button
                     type="button"
                     class="mode-row-action"
-                    :disabled="!goalInput.trim()"
-                    @click="() => {
-                      const o = goalInput.trim();
-                      if (o) { emit('createGoal', o); goalInput = ''; }
-                    }"
-                  >{{ t('status.goalStart') }}</button>
-                </template>
+                    @click="emit('controlGoal', 'pause')"
+                  >{{ t('status.goalPause') }}</button>
+                  <button
+                    type="button"
+                    class="mode-row-action"
+                    @click="emit('controlGoal', 'resume')"
+                  >{{ t('status.goalResume') }}</button>
+                </div>
               </div>
             </div>
           </div>
@@ -1245,7 +1228,7 @@ function selectModel(modelId: string): void {
 
 <style scoped>
 .composer {
-  padding: 8px 16px 12px;
+  padding: 7px 16px 12px;
   background: transparent;
   transition: background 0.12s;
 }
@@ -1972,8 +1955,26 @@ function selectModel(modelId: string): void {
 .mode-row-goal {
   flex-wrap: wrap;
   cursor: default;
+  padding: 0;
+  gap: 0;
 }
 .mode-row-goal:hover { background: transparent; }
+.mode-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--sans);
+  text-align: left;
+}
+.mode-row-main:hover { background: var(--panel2); }
+.mode-row-goal.on .mode-row-main .mode-row-name { color: var(--blue2); font-weight: 600; }
 .mode-row-actions {
   display: flex;
   gap: 6px;
