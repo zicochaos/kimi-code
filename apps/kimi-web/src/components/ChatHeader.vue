@@ -272,20 +272,17 @@ function startArchive(): void {
         <span v-if="ahead > 0" class="ch-ahead">↑{{ ahead }}</span>
         <span v-if="behind > 0" class="ch-behind">↓{{ behind }}</span>
       </span>
-      <template v-if="hasLineStats">
-        <span class="ch-pill ch-diff-pill">
-          <span v-if="adds > 0" class="ch-add">+{{ adds }}</span>
-          <span v-if="dels > 0" class="ch-del">-{{ dels }}</span>
-        </span>
-      </template>
-      <span v-else-if="changes > 0" class="ch-pill ch-changes-pill">{{ t('header.changed', { n: changes }) }}</span>
+      <span v-if="hasLineStats" class="ch-pill ch-diff-pill">
+        <span v-if="adds > 0" class="ch-add">+{{ adds }}</span>
+        <span v-if="dels > 0" class="ch-del">-{{ dels }}</span>
+      </span>
     </div>
 
     <!-- GitHub PR status -->
     <button
       v-if="pr"
       type="button"
-      class="ch-pr"
+      class="ch-pill ch-pr"
       :class="`pr-${pr.state}`"
       :title="t('header.openPr')"
       @click="pr && emit('openPr', pr.url)"
@@ -366,10 +363,6 @@ function startArchive(): void {
 }
 .ch-sync-pill { border-color: var(--line); }
 .ch-diff-pill { border-color: color-mix(in srgb, var(--ok) 20%, var(--line)); }
-.ch-changes-pill {
-  border-color: color-mix(in srgb, var(--warn) 20%, var(--line));
-  color: var(--warn);
-}
 .ch-ahead { color: var(--warn); flex: none; }
 .ch-behind { color: var(--blue2); flex: none; }
 .ch-add { color: var(--ok); flex: none; }
@@ -397,17 +390,12 @@ function startArchive(): void {
 .ch-pr {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 3px;
   flex: none;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--bg);
-  font-family: var(--mono);
-  font-size: calc(var(--ui-font-size) - 3px);
-  padding: 2px 9px;
   cursor: pointer;
   color: var(--dim);
   margin-left: -4px;
+  font-size: calc(var(--ui-font-size) - 2.5px);
 }
 .ch-pr.pr-open { color: #1a7f37; border-color: color-mix(in srgb, #1a7f37 30%, var(--line)); }
 .ch-pr.pr-merged { color: #8250df; border-color: color-mix(in srgb, #8250df 30%, var(--line)); }
