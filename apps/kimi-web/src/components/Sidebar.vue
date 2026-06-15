@@ -574,6 +574,8 @@ function blinkOnce(): void {
   flex-direction: column;
   min-height: 0;
   width: 100%;
+  container-type: inline-size;
+  container-name: sidebar-col;
 }
 
 /* Header: logo + settings (no border — flows into the workspace list). */
@@ -588,7 +590,8 @@ function blinkOnce(): void {
 }
 .ch-logo {
   height: 22px;
-  width: auto;
+  width: 32px;
+  flex: none;
   display: block;
   cursor: pointer;
   user-select: none;
@@ -612,6 +615,12 @@ function blinkOnce(): void {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* In narrow sidebars the product name drops out so the logo keeps its fixed
+   size and the action buttons remain reachable. */
+@container sidebar-col (max-width: 250px) {
+  .ch-name { display: none; }
 }
 .ch-beta {
   flex: none;
