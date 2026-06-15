@@ -11,7 +11,7 @@ export default {
   exportLog: 'Troubleshooting log',
   logHint: 'Enable with ?debug=1 to capture',
   exportLogBtn: 'Export log',
-  beta: 'Beta',
+  beta: 'Experimental',
   betaToc: 'Proportional conversation outline',
   betaTocHint: ' Larger bubbles, viewport indicator, and hover tooltip',
 };
