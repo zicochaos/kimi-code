@@ -946,7 +946,7 @@ function renderBlockKey(block: AssistantRenderBlock, index: number): string {
   box-sizing: border-box;
 }
 .u-meta .u-edit svg {
-  margin-top: -1px;
+  margin-top: -1.5px;
 }
 .u-meta .u-edit-text {
   max-width: 0;
