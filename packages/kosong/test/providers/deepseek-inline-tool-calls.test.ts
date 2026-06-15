@@ -1,8 +1,10 @@
+import type { StreamedMessagePart } from '#/message';
 import {
   DEEPSEEK_TOOL_CALLS_BEGIN,
   DeepSeekInlineToolCallFilter,
   parseDeepSeekInlineToolCalls,
 } from '#/providers/deepseek-inline-tool-calls';
+import { OpenAILegacyStreamedMessage } from '#/providers/openai-legacy';
 import { describe, expect, it } from 'vitest';
 
 const SEP = '▁';
@@ -75,5 +77,59 @@ describe('DeepSeekInlineToolCallFilter', () => {
     out += f.flush();
     expect(out).toBe('ok ');
     expect(f.sawToolBlock).toBe(true);
+  });
+
+  it('flush is idempotent — a second call returns empty', () => {
+    const f = new DeepSeekInlineToolCallFilter();
+    f.push('held');
+    expect(f.flush()).toBe('held');
+    expect(f.flush()).toBe('');
+  });
+
+  it('suppresses a malformed block too (it has the begin token but no parseable call)', () => {
+    const f = new DeepSeekInlineToolCallFilter();
+    const malformed = `${DEEPSEEK_TOOL_CALLS_BEGIN}<|tool${SEP}call${SEP}begin|>function<|tool${SEP}sep|>read_file\n\`\`\`json\n{ broken`;
+    let out = f.push(`note ${malformed}`);
+    out += f.flush();
+    expect(out).toBe('note ');
+    expect(f.sawToolBlock).toBe(true);
+    expect(parseDeepSeekInlineToolCalls(f.content)).toEqual([]);
+  });
+});
+
+describe('OpenAILegacyStreamedMessage inline-tool fallback (non-stream)', () => {
+  const nonStream = (content: string) =>
+    new OpenAILegacyStreamedMessage(
+      { id: 'cmpl_test', choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }] } as never,
+      false,
+      undefined,
+    );
+  const collect = async (sm: AsyncIterable<StreamedMessagePart>): Promise<StreamedMessagePart[]> => {
+    const parts: StreamedMessagePart[] = [];
+    for await (const part of sm) parts.push(part);
+    return parts;
+  };
+  const textOf = (parts: StreamedMessagePart[]) =>
+    parts
+      .filter((p): p is Extract<StreamedMessagePart, { type: 'text' }> => p.type === 'text')
+      .map((p) => p.text)
+      .join('');
+
+  it('parses a leaked block into a function part and strips the tokens', async () => {
+    const parts = await collect(nonStream(`Reading. ${wrap(callBlock('read_file', '{"path":"a.js"}'))}`));
+    expect(textOf(parts)).toBe('Reading. ');
+    const fns = parts.filter((p): p is Extract<StreamedMessagePart, { type: 'function' }> => p.type === 'function');
+    expect(fns).toHaveLength(1);
+    expect(fns[0]?.name).toBe('read_file');
+  });
+
+  it('strips the tokens of a malformed block even though no call is dispatched', async () => {
+    const parts = await collect(
+      nonStream(`Reading. ${DEEPSEEK_TOOL_CALLS_BEGIN}<|tool${SEP}call${SEP}begin|>function<|tool${SEP}sep|>read_file\n\`\`\`json\n{ broken`),
+    );
+    const text = textOf(parts);
+    expect(text).toBe('Reading. ');
+    expect(text).not.toContain(DEEPSEEK_TOOL_CALLS_BEGIN);
+    expect(parts.some((p) => p.type === 'function')).toBe(false);
   });
 });

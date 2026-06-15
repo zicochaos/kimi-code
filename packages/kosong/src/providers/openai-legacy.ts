@@ -380,21 +380,22 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
     }
 
     const structuredToolCalls = (message.tool_calls ?? []).filter(isFunctionToolCall);
+    const content = typeof message.content === 'string' ? message.content : '';
 
     // Fallback: a backend served a DeepSeek-format model but left its inline
     // tool-call tokens in `content` instead of structuring them as `tool_calls`.
-    // Parse them so the call is still dispatched (no-op when absent or when the
-    // provider already structured the call).
-    const inlineToolCalls =
-      structuredToolCalls.length === 0 && typeof message.content === 'string'
-        ? parseDeepSeekInlineToolCalls(message.content)
-        : [];
+    // Strip the block from visible text whenever the begin token is present (and
+    // the provider returned no structured call) — even if some blocks fail to
+    // parse — so the raw tokens never render. Parse what we can into dispatchable
+    // tool calls. No-op when absent or already structured.
+    const hasInlineBlock =
+      structuredToolCalls.length === 0 && content.includes(DEEPSEEK_TOOL_CALLS_BEGIN);
+    const inlineToolCalls = hasInlineBlock ? parseDeepSeekInlineToolCalls(content) : [];
 
-    if (typeof message.content === 'string' && message.content.length > 0) {
-      const text =
-        inlineToolCalls.length > 0
-          ? message.content.slice(0, message.content.indexOf(DEEPSEEK_TOOL_CALLS_BEGIN))
-          : message.content;
+    if (content.length > 0) {
+      const text = hasInlineBlock
+        ? content.slice(0, content.indexOf(DEEPSEEK_TOOL_CALLS_BEGIN))
+        : content;
       if (text.length > 0) {
         yield { type: 'text', text } satisfies StreamedMessagePart;
       }

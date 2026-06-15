@@ -94,9 +94,15 @@ export class DeepSeekInlineToolCallFilter {
     return '';
   }
 
-  /** Remaining buffered text once the stream ends (empty if a block was suppressed). */
+  /**
+   * Remaining buffered text once the stream ends (empty if a block was
+   * suppressed). Idempotent: the buffer is cleared, so a second call returns ''.
+   */
   flush(): string {
-    return this.suppressing ? '' : this.buffer;
+    if (this.suppressing) return '';
+    const out = this.buffer;
+    this.buffer = '';
+    return out;
   }
 
   /** Whether the begin marker was seen. */
