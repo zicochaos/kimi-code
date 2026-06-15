@@ -987,29 +987,10 @@ onUnmounted(() => {
       @archive-session="(id) => emit('archiveSession', id)"
     />
 
-    <!-- Legacy conversation outline: left gutter, uniform bubbles, native title. -->
-    <nav
-      v-if="showConversationToc && !betaToc"
-      class="conversation-toc legacy"
-      :aria-label="t('conversation.toc')"
-    >
-      <button
-        v-for="item in conversationTocItems"
-        :key="item.id"
-        type="button"
-        class="toc-bubble"
-        :class="item.role"
-        :title="item.title"
-        @click="scrollToTurn(item.id)"
-      >
-        <span class="toc-no">{{ item.no }}</span>
-      </button>
-    </nav>
-
     <!-- Beta conversation outline: right edge, proportional bubbles, viewport indicator, hover tooltip. -->
     <nav
       v-if="showConversationToc && betaToc"
-      class="conversation-toc beta"
+      class="conversation-toc"
       :aria-label="t('conversation.toc')"
     >
       <div class="toc-track">
@@ -1675,70 +1656,6 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   padding: 0;
-}
-
-/* Legacy outline: left gutter, uniform bubbles. */
-.conversation-toc.legacy {
-  top: 58px;
-  bottom: 130px;
-  left: 12px;
-  width: 34px;
-  gap: 6px;
-  align-items: stretch;
-  padding: 5px 4px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-}
-.conversation-toc.legacy::-webkit-scrollbar {
-  display: none;
-}
-.conversation-toc.legacy .toc-bubble {
-  appearance: none;
-  position: relative;
-  border: 0;
-  padding: 0;
-  width: 26px;
-  height: 16px;
-  background: transparent;
-  cursor: pointer;
-  opacity: 0.68;
-  transition: opacity 0.14s ease, transform 0.14s ease;
-}
-.conversation-toc.legacy .toc-bubble:hover,
-.conversation-toc.legacy .toc-bubble:focus-visible {
-  opacity: 1;
-  transform: translateX(1px);
-  outline: none;
-}
-.conversation-toc.legacy .toc-bubble::before {
-  content: '';
-  display: block;
-  width: 18px;
-  height: 12px;
-  border-radius: 8px;
-  background: var(--line2);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 8%, transparent);
-}
-.conversation-toc.legacy .toc-bubble.user::before {
-  margin-left: auto;
-  background: var(--blue);
-  box-shadow: none;
-}
-.conversation-toc.legacy .toc-bubble.assistant::before {
-  margin-right: auto;
-}
-.conversation-toc.legacy .toc-bubble.compaction::before {
-  width: 22px;
-  height: 3px;
-  margin: 6px auto 0;
-  border-radius: 999px;
-  background: var(--faint);
-  box-shadow: none;
-}
-
-/* Beta outline: right edge, proportional bubbles, viewport, tooltip. */
-.conversation-toc.beta {
   top: 74px;
   bottom: auto;
   left: calc(50% + (var(--read-max) / 2) + 8px);
@@ -1747,10 +1664,10 @@ onUnmounted(() => {
   opacity: 0.45;
   transition: opacity 0.18s ease;
 }
-.conversation-toc.beta:hover {
+.conversation-toc:hover {
   opacity: 1;
 }
-.conversation-toc.beta .toc-track {
+.toc-track {
   flex: none;
   display: flex;
   flex-direction: column;
@@ -1763,10 +1680,10 @@ onUnmounted(() => {
   max-height: 100%;
   position: relative;
 }
-.conversation-toc.beta .toc-track::-webkit-scrollbar {
+.toc-track::-webkit-scrollbar {
   display: none;
 }
-.conversation-toc.beta .toc-bubble {
+.toc-bubble {
   appearance: none;
   position: relative;
   flex-shrink: 0;
@@ -1779,30 +1696,30 @@ onUnmounted(() => {
   opacity: 0.85;
   transition: opacity 0.14s ease, transform 0.14s ease, box-shadow 0.14s ease;
 }
-.conversation-toc.beta .toc-bubble.active {
+.toc-bubble.active {
   opacity: 1;
 }
-.conversation-toc.beta .toc-bubble:hover,
-.conversation-toc.beta .toc-bubble:focus-visible {
+.toc-bubble:hover,
+.toc-bubble:focus-visible {
   opacity: 1;
   transform: translateX(2px) scale(1.05);
   outline: none;
 }
-.conversation-toc.beta .toc-bubble.user {
+.toc-bubble.user {
   background: var(--blue);
   box-shadow: none;
 }
-.conversation-toc.beta .toc-bubble.assistant {
+.toc-bubble.assistant {
   background: var(--panel2);
   box-shadow: inset 0 0 0 1px var(--line);
 }
-.conversation-toc.beta .toc-bubble.compaction {
+.toc-bubble.compaction {
   height: 10px;
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--faint);
   border-radius: 999px;
 }
-.conversation-toc.beta .toc-bubble.active::after {
+.toc-bubble.active::after {
   content: '';
   position: absolute;
   inset: -2px -4px -2px -2px;
@@ -1819,7 +1736,7 @@ onUnmounted(() => {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
-.conversation-toc.beta .toc-viewport {
+.toc-viewport {
   position: absolute;
   left: 0;
   right: 0;
@@ -1828,7 +1745,7 @@ onUnmounted(() => {
   border-radius: 4px;
   z-index: 0;
 }
-.conversation-toc.beta .toc-tooltip {
+.toc-tooltip {
   position: absolute;
   right: calc(100% + 8px);
   top: 0;
@@ -1846,7 +1763,7 @@ onUnmounted(() => {
   pointer-events: none;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
 }
-.conversation-toc.beta .toc-tooltip::before {
+.toc-tooltip::before {
   content: '';
   position: absolute;
   left: auto;
