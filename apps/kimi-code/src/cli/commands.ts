@@ -84,7 +84,7 @@ export function createProgram(
   program
     .command('upgrade')
     .description('Upgrade Kimi Code to the latest version.')
-    .option('-y, --yes', 'Install the update without prompting.', false)
+    .option('--yes', 'Install the update without prompting.', false)
     .action(async function () {
       const opts = this.optsWithGlobals<{ readonly yes?: boolean }>();
       await onUpgrade(opts.yes === true);
