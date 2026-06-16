@@ -4,7 +4,9 @@ import type { Kaos } from '@moonshot-ai/kaos';
 
 import { normalizeAdditionalDirs } from '../config';
 import { listDirectory } from '../tools/support/list-directory';
-import type { SystemPromptContext } from './types';
+import type { SystemPromptContext, WorktreeInfo } from './types';
+
+export type { WorktreeInfo };
 
 // Soft budget for the combined AGENTS.md content injected into the system
 // prompt. ~32 KB is roughly 8K–20K tokens (≈1.5–3% of a 262144-token context),
@@ -17,7 +19,7 @@ const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
 
 export interface PreparedSystemPromptContext
-  extends Pick<SystemPromptContext, 'cwdListing' | 'agentsMd' | 'additionalDirsInfo'> {
+  extends Pick<SystemPromptContext, 'cwdListing' | 'agentsMd' | 'additionalDirsInfo' | 'worktreeInfo'> {
   /** Present when the combined AGENTS.md content exceeds the recommended size. */
   readonly agentsMdWarning?: string;
 }
@@ -43,6 +45,18 @@ export async function prepareSystemPromptContext(
     additionalDirsInfo,
     agentsMdWarning: agentsMdResult.warning,
   };
+}
+
+export function getWorktreeInfoFromSessionMetadata(metadata: {
+  readonly custom: Record<string, unknown>;
+}): WorktreeInfo | undefined {
+  const custom = metadata.custom;
+  const worktreePath = custom?.['worktreePath'];
+  const parentRepoPath = custom?.['parentRepoPath'];
+  if (typeof worktreePath === 'string' && typeof parentRepoPath === 'string') {
+    return { worktreePath, parentRepoPath };
+  }
+  return undefined;
 }
 
 export async function loadAgentsMd(kaos: Kaos, brandHome?: string): Promise<string> {
