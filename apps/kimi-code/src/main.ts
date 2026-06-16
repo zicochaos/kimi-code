@@ -28,7 +28,7 @@ import type { CLIOptions } from './cli/options';
 import { OptionConflictError, validateOptions } from './cli/options';
 import { runPrompt } from './cli/run-prompt';
 import { runShell } from './cli/run-shell';
-import { createWorktree, findGitRoot, WorktreeError } from './utils/git/worktree';
+import { createWorktree, findGitRoot, removeWorktree, WorktreeError } from './utils/git/worktree';
 import { formatStartupError } from './cli/startup-error';
 import { runPluginNodeEntry } from './cli/sub/plugin-run-node';
 import { handleUpgrade } from './cli/sub/upgrade';
@@ -51,10 +51,6 @@ import { runNativeAssetSmokeIfRequested } from './native/smoke';
 export interface MainCommandOutcome {
   readonly headlessCompleted: boolean;
 }
-
-// Defensive guard: if handleMainCommand is ever re-entered (e.g. reload),
-// do not create a nested worktree.
-let worktreeCreated = false;
 
 async function prepareWorktree(
   worktreeName: string,
@@ -84,12 +80,11 @@ export async function handleMainCommand(
     throw error;
   }
 
-  if (opts.worktree !== undefined && !worktreeCreated) {
+  if (opts.worktree !== undefined) {
     try {
       const { worktreePath, parentRepoPath } = await prepareWorktree(opts.worktree);
       opts.worktreePath = worktreePath;
       opts.parentRepoPath = parentRepoPath;
-      worktreeCreated = true;
     } catch (error) {
       if (error instanceof WorktreeError) {
         process.stderr.write(`error: ${error.message}\n`);
@@ -107,13 +102,26 @@ export async function handleMainCommand(
     process.exit(0);
   }
 
-  if (validated.uiMode === 'print') {
-    await runPrompt(validated.options, version);
-    return { headlessCompleted: true };
-  }
+  try {
+    if (validated.uiMode === 'print') {
+      await runPrompt(validated.options, version);
+      return { headlessCompleted: true };
+    }
 
-  await runShell(validated.options, version);
-  return { headlessCompleted: false };
+    await runShell(validated.options, version);
+    return { headlessCompleted: false };
+  } catch (error) {
+    // If the runner failed during startup after we created a worktree, the
+    // worktree is still empty (no session ran), so clean it up to avoid leaks.
+    if (opts.worktreePath !== undefined && opts.parentRepoPath !== undefined) {
+      try {
+        removeWorktree(opts.parentRepoPath, opts.worktreePath);
+      } catch {
+        // Best-effort cleanup only.
+      }
+    }
+    throw error;
+  }
 }
 
 /** `kimi migrate`: launch the migration screen only, then exit. */
