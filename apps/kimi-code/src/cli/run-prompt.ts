@@ -212,7 +212,7 @@ export async function runPrompt(
         stderr,
       );
     }
-    writeResumeHint(session.id, outputFormat, stdout, stderr);
+    writeResumeHint(session.id, outputFormat, stdout, stderr, opts.worktreePath !== undefined ? workDir : undefined);
 
     withTelemetryContext({ sessionId: session.id }).track('exit', {
       duration_ms: Date.now() - startedAt,

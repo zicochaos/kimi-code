@@ -201,12 +201,13 @@ export async function runShell(
 
   tui.onExit = async (exitCode = 0) => {
     const sessionId = tui.getCurrentSessionId();
-    const hasContent = tui.hasSessionContent();
+    const hasContent = tui.hasEverHadSessionContent();
     setCrashPhase('shutdown');
     trackLifecycle('exit', { duration_ms: Date.now() - startedAt });
 
     // Clean up the git worktree for empty sessions so abandoned worktrees
-    // do not accumulate.
+    // do not accumulate. Use the lifetime flag so `/new` does not delete a
+    // worktree that held an earlier session.
     if (!hasContent && opts.worktreePath !== undefined && opts.parentRepoPath !== undefined) {
       try {
         removeWorktree(opts.parentRepoPath, opts.worktreePath);
@@ -221,7 +222,11 @@ export async function runShell(
     process.stdout.write(`${gutter}Bye!\n`);
     const hints: string[] = [];
     if (sessionId !== '' && hasContent) {
-      hints.push(`${gutter}To resume this session: kimi -r ${sessionId}`);
+      const resumeCommand =
+        opts.worktreePath !== undefined
+          ? `cd "${process.cwd()}" && kimi -r ${sessionId}`
+          : `kimi -r ${sessionId}`;
+      hints.push(`${gutter}To resume this session: ${resumeCommand}`);
     }
     if (tui.exitOpenUrl !== undefined) {
       hints.push(`${gutter}open ${toTerminalHyperlink(tui.exitOpenUrl, tui.exitOpenUrl)}`);

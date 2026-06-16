@@ -391,8 +391,10 @@ export function writeResumeHint(
   outputFormat: PromptOutputFormat,
   stdout: PromptOutput,
   stderr: PromptOutput,
+  workDir?: string,
 ): void {
-  const command = `kimi -r ${sessionId}`;
+  const command =
+    workDir !== undefined ? `cd "${workDir}" && kimi -r ${sessionId}` : `kimi -r ${sessionId}`;
   const content = `To resume this session: ${command}`;
   if (outputFormat === 'stream-json') {
     const message: PromptJsonResumeMetaMessage = {
