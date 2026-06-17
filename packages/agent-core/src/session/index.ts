@@ -10,6 +10,7 @@ import { proxyWithExtraPayload } from '#/rpc/types';
 
 import { Agent, type AgentOptions, type AgentType } from '../agent';
 import { HookEngine, type HookDef } from './hooks';
+import { renderHookResult } from './hooks/user-prompt';
 import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
 import { parseBooleanEnv, resolveConfigValue, type BackgroundConfig } from '../config';
 import { makeErrorPayload } from '../errors';
@@ -178,6 +179,7 @@ export class Session {
     this.hookEngine = new HookEngine(options.hooks, {
       cwd: options.kaos.getcwd(),
       sessionId: options.id,
+      sessionDir: options.homedir,
     });
     this.telemetry = options.telemetry ?? noopTelemetryClient;
     this.toolKaos = options.kaos;
@@ -683,9 +685,29 @@ export class Session {
   }
 
   private async triggerSessionStart(source: 'startup' | 'resume'): Promise<void> {
-    await this.hookEngine.trigger('SessionStart', {
+    const results = await this.hookEngine.trigger('SessionStart', {
       matcherValue: source,
       inputData: { source },
+    });
+
+    const messages: string[] = [];
+    for (const result of results) {
+      if (result.action !== 'allow') continue;
+      const text = (result.message ?? result.stdout ?? '').trim();
+      if (text.length > 0) messages.push(text);
+    }
+
+    if (messages.length === 0) return;
+
+    const mainAgent = this.getReadyAgent('main');
+    if (mainAgent === undefined) return;
+
+    const block = messages.map((message) => renderHookResult('SessionStart', message)).join('\n');
+    mainAgent.context.appendMessage({
+      role: 'assistant',
+      content: [{ type: 'text', text: block }],
+      toolCalls: [],
+      origin: { kind: 'hook_result', event: 'SessionStart', blocked: false },
     });
   }
 
