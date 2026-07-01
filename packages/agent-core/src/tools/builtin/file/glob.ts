@@ -391,6 +391,8 @@ function isBroadPositivePattern(pattern: string): boolean {
  *   - Patterns with `/` match the relative path from the search root.
  *   - A leading `/` is stripped — ripgrep treats `/src/*.ts` as rooted at
  *     the search root, equivalent to `src/*.ts`.
+ *   - A leading `./` is preserved and does not match, because rg matches
+ *     relative subjects such as `src/a.ts`, never `./src/a.ts`.
  *   - `**` matches zero or more directory levels.
  *   - Dotfiles are matched (rg runs with `--hidden`).
  *   - Matching is case-sensitive, matching ripgrep's default (use
@@ -422,25 +424,25 @@ function compileGlobMatcher(pattern: string): (relPath: string) => boolean {
   if (rooted) {
     normalizedPattern = normalizedPattern.slice(1);
   }
-  // Strip a leading `./` — rg's glob subject never has it, and picomatch
-  // treats `./` as optional, which would broaden matches. Normalizing both
-  // sides to the un-prefixed form keeps the in-process filter consistent.
-  if (normalizedPattern.startsWith('./')) {
-    normalizedPattern = normalizedPattern.slice(2);
-  }
+  const hasLeadingDotSlash = normalizedPattern.startsWith('./');
+  const rejectsLiteralBracePattern = containsUnescapedBraceGroup(normalizedPattern);
   // Escape picomatch-only extensions that rg --glob does not support,
   // so the in-process matcher matches the same files rg would.
   const escapedPattern = escapeForPicomatch(normalizedPattern);
+  const fn = picomatch(escapedPattern, opts);
+  const matchesInput = (input: string): boolean => {
+    if (hasLeadingDotSlash) return false;
+    if (rejectsLiteralBracePattern && input === normalizedPattern) return false;
+    return fn(input);
+  };
   // A pattern without `/` matches the basename at any depth — unless the
   // original pattern was rooted with a leading `/`, in which case it
   // matches only at the search root (gitignore-style rooted globs).
   let matcher: (relPath: string) => boolean;
   if (!normalizedPattern.includes('/') && !rooted) {
-    const fn = picomatch(escapedPattern, opts);
-    matcher = (relPath: string) => fn(relPath.split('/').pop()!);
+    matcher = (relPath: string) => matchesInput(relPath.split('/').pop()!);
   } else {
-    const fn = picomatch(escapedPattern, opts);
-    matcher = (relPath: string) => fn(relPath);
+    matcher = (relPath: string) => matchesInput(relPath);
   }
   return negated ? (relPath: string) => !matcher(relPath) : matcher;
 }
@@ -460,6 +462,36 @@ function isEscaped(pattern: string, index: number): boolean {
     slashCount++;
   }
   return slashCount % 2 === 1;
+}
+
+function containsUnescapedBraceGroup(pattern: string): boolean {
+  let inBracket = false;
+  let bracketContentStart = -1;
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i]!;
+    if (inBracket) {
+      if (ch === '\\' && i + 1 < pattern.length) {
+        i++;
+        continue;
+      }
+      if (ch === ']' && i !== bracketContentStart) {
+        inBracket = false;
+      }
+      continue;
+    }
+    if (ch === '\\' && i + 1 < pattern.length) {
+      i++;
+      continue;
+    }
+    if (ch === '[') {
+      inBracket = true;
+      const next = pattern[i + 1];
+      bracketContentStart = next === '!' || next === '^' ? i + 2 : i + 1;
+      continue;
+    }
+    if (ch === '{') return true;
+  }
+  return false;
 }
 
 /**

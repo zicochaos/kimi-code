@@ -212,6 +212,17 @@ describe('GlobTool', () => {
     expect(result.output).toBe('a.ts\n1..2.ts');
   });
 
+  it('does not accept a literal brace filename for brace expansion patterns', async () => {
+    const exec = execReturning('/workspace/a.ts\n/workspace/b.ts\n/workspace/{a,b}.ts\n');
+    const tool = new GlobTool(kaosWithExec(exec), workspace);
+
+    const result = await executeTool(tool, context({ pattern: '{a,b}.ts' }));
+
+    expect(result.isError).toBeFalsy();
+    expect(execArgs(exec)).not.toContain('{a,b}.ts');
+    expect(result.output).toBe('a.ts\nb.ts');
+  });
+
   it('matches an escaped-brace pattern in-process so literal-brace files stay matchable', async () => {
     // `\{a,b\}.ts` opts out of brace expansion — the user wants a file
     // literally named `{a,b}.ts`. The pattern is matched in-process, so the
@@ -884,11 +895,10 @@ describe('GlobTool', () => {
     expect(result.output).toContain('unopened');
   });
 
-  it('strips ./ prefix from glob patterns, matching rg --glob behavior', async () => {
+  it('preserves leading ./ in glob patterns, matching rg --glob behavior', async () => {
     // rg treats `./src/*.ts` as not matching `src/a.ts` because the glob
-    // subject is `src/a.ts` (no `./` prefix). Stripping `./` from the
-    // pattern and matching against the un-prefixed relative path keeps
-    // the in-process filter consistent with rg.
+    // subject is `src/a.ts` (no `./` prefix). The in-process matcher must
+    // not let picomatch treat the prefix as optional.
     const exec = execReturning('/workspace/src/a.ts\n/workspace/other/b.ts\n');
     const tool = new GlobTool(kaosWithExec(exec), workspace);
 
@@ -898,7 +908,7 @@ describe('GlobTool', () => {
     );
 
     expect(result.isError).toBeFalsy();
-    expect(result.output).toContain('src/a.ts');
+    expect(result.output).not.toContain('src/a.ts');
     expect(result.output).not.toContain('other/b.ts');
   });
 
