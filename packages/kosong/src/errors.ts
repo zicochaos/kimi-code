@@ -98,6 +98,33 @@ export function isRetryableGenerateError(error: unknown): boolean {
   return error instanceof APIStatusError && [429, 500, 502, 503, 504].includes(error.statusCode);
 }
 
+// `terminated` is the undici signature for an SSE/HTTP body stream that is
+// dropped mid-flight (common with Node's native fetch on long reasoning
+// streams). It surfaces as a raw `TypeError: terminated`, so it must be
+// recognized here as a transport-layer connection failure. Shared by the
+// Anthropic and OpenAI providers so a raw, non-SDK transport error classifies
+// the same way regardless of which provider was streaming.
+const NETWORK_RE = /network|connection|connect|disconnect|terminated/i;
+const TIMEOUT_RE = /timed?\s*out|timeout|deadline/i;
+
+/**
+ * Classify a raw (non-SDK) error message into the right transport-layer
+ * `ChatProviderError` subclass: a timeout becomes a retryable `APITimeoutError`,
+ * a dropped connection / undici `terminated` becomes a retryable
+ * `APIConnectionError`, and anything else stays a non-retryable base
+ * `ChatProviderError`. Timeout is checked first so "connection timed out"
+ * classifies as a timeout rather than a bare connection error.
+ */
+export function classifyBaseApiError(message: string): ChatProviderError {
+  if (TIMEOUT_RE.test(message)) {
+    return new APITimeoutError(message);
+  }
+  if (NETWORK_RE.test(message)) {
+    return new APIConnectionError(message);
+  }
+  return new ChatProviderError(`Error: ${message}`);
+}
+
 const CONTEXT_OVERFLOW_MESSAGE_PATTERNS = [
   /context[ _-]?length/,
   /(?:context[ _-]?window.*exceed|exceed.*context[ _-]?window)/,
@@ -143,16 +170,25 @@ export function isContextOverflowStatusError(statusCode: number, message: string
   return CONTEXT_OVERFLOW_MESSAGE_PATTERNS.some((pattern) => pattern.test(lowerMessage));
 }
 
-// Strict providers (Anthropic) reject a request whose assistant `tool_use` and
-// `tool_result` blocks are not correctly paired and adjacent — a missing result,
-// a stray result with no matching call, or a result that does not immediately
-// follow its call. The validation runs before any generation, so the error is a
-// non-retryable 4xx. A caller can react by resending a re-projected, strictly
-// wire-compliant request rather than leaving the session permanently stuck.
+// Strict providers reject a request whose assistant `tool_use`/`tool_calls` and
+// `tool_result`/`tool` blocks are not correctly paired and adjacent — a missing
+// result, a stray result with no matching call, or a result that does not
+// immediately follow its call. Anthropic phrases this in terms of
+// `tool_use`/`tool_result`; OpenAI-compatible providers (Moonshot / Kimi) phrase
+// it as a `tool_call_id` that "is not found" in the preceding assistant message.
+// The validation runs before any generation, so the error is a non-retryable
+// 4xx. A caller can react by resending a re-projected, strictly wire-compliant
+// request rather than leaving the session permanently stuck.
 const TOOL_EXCHANGE_ADJACENCY_MESSAGE_PATTERNS = [
   /tool_use[\s\S]*tool_result/,
   /tool_result[\s\S]*tool_use/,
   /unexpected\s+`?tool_result/,
+  // OpenAI-compatible (Moonshot / Kimi): a `tool` message references a
+  // `tool_call_id` with no matching `tool_calls` entry in the preceding
+  // assistant message. Observed verbatim as `tool_call_id  is not found`
+  // (doubled space). Anchored on `tool_call_id` so an unrelated "not found"
+  // (e.g. a 404-style body) cannot trip the recovery.
+  /tool_call_id[\s\S]*not found/,
 ] as const;
 
 export function isToolExchangeAdjacencyError(error: unknown): boolean {

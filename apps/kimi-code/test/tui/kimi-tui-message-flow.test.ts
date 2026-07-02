@@ -7,7 +7,7 @@ import {
   deleteAllKittyImages,
   resetCapabilitiesCache,
   setCapabilities,
-} from '@earendil-works/pi-tui';
+} from '@moonshot-ai/pi-tui';
 import type { ApprovalRequest, ApprovalResponse, Event } from '@moonshot-ai/kimi-code-sdk';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -1664,7 +1664,7 @@ command = "vim"
     expect(session.prompt).not.toHaveBeenCalled();
   });
 
-  it('does not persist bash input to input history', async () => {
+  it('persists bash input to input history with a leading !', async () => {
     const { driver } = await makeDriver();
     driver.state.appState.streamingPhase = 'waiting';
     driver.state.appState.inputMode = 'bash';
@@ -1672,7 +1672,7 @@ command = "vim"
 
     driver.handleUserInput('ls');
 
-    expect(driver.persistInputHistory).not.toHaveBeenCalled();
+    expect(driver.persistInputHistory).toHaveBeenCalledWith('!ls');
   });
 
   it('persists normal input to input history', async () => {
@@ -1766,12 +1766,14 @@ command = "vim"
   it('echoes a bash command with a $ prompt in the transcript', async () => {
     const runShellCommand = vi.fn(async () => ({ stdout: '', stderr: '', isError: false }));
     const session = makeSession({ runShellCommand });
-    const { driver } = await makeDriver(session);
+    const { driver, harness } = await makeDriver(session);
     driver.state.appState.inputMode = 'bash';
     driver.state.editor.inputMode = 'bash';
 
     driver.handleUserInput('ls');
     await Promise.resolve();
+
+    expect(harness.track).toHaveBeenCalledWith('shell_command', undefined);
 
     const transcript = stripSgr(driver.state.transcriptContainer.render(120).join('\n'));
     expect(transcript).toContain('$ ls');
@@ -4682,5 +4684,83 @@ command = "vim"
     expect(transcript).toContain('UserPromptSubmit hook');
     expect(transcript).toContain('(empty)');
     expect(transcript).not.toContain('<hook_result');
+  });
+});
+
+describe('/model status displayName override', () => {
+  it('shows the overridden display name in the switch status', async () => {
+    const session = makeSession();
+    const setConfig = vi.fn(async () => ({ providers: {} }));
+    const { driver } = await makeDriver(session, {
+      getConfig: vi.fn(async () => ({
+        models: {
+          k2: {
+            provider: 'managed:kimi-code',
+            model: 'kimi-k2',
+            maxContextSize: 100,
+            displayName: 'Kimi K2',
+            capabilities: ['thinking'],
+          },
+          turbo: {
+            provider: 'managed:kimi-code',
+            model: 'kimi-turbo',
+            maxContextSize: 100,
+            displayName: 'Remote Turbo',
+            capabilities: ['thinking'],
+            overrides: { displayName: 'Custom Turbo' },
+          },
+        },
+        defaultModel: 'k2',
+        thinking: { enabled: false },
+      })),
+      setConfig,
+    });
+
+    driver.handleUserInput('/model turbo');
+
+    await vi.waitFor(() => {
+      expect(driver.state.editorContainer.children[0]).toBeInstanceOf(TabbedModelSelectorComponent);
+    });
+    (driver.state.editorContainer.children[0] as TabbedModelSelectorComponent).handleInput('\r');
+
+    await vi.waitFor(() => {
+      expect(setConfig).toHaveBeenCalledWith({
+        defaultModel: 'turbo',
+        thinking: { enabled: true },
+      });
+    });
+
+    expect(renderTranscript(driver)).toContain('Switched to Custom Turbo with thinking on.');
+    expect(renderTranscript(driver)).not.toContain('Remote Turbo');
+  });
+});
+
+describe('/effort support_efforts override', () => {
+  it('rejects efforts hidden by support_efforts override', async () => {
+    const session = makeSession();
+    const { driver } = await makeDriver(session, {
+      getConfig: vi.fn(async () => ({
+        models: {
+          k2: {
+            provider: 'managed:kimi-code',
+            model: 'kimi-k2',
+            maxContextSize: 100,
+            displayName: 'Kimi K2',
+            capabilities: ['thinking'],
+            supportEfforts: ['low', 'high', 'max'],
+            overrides: { supportEfforts: ['low', 'high'] },
+          },
+        },
+        defaultModel: 'k2',
+        thinking: { enabled: true, effort: 'low' },
+      })),
+    });
+
+    driver.handleUserInput('/effort max');
+
+    await vi.waitFor(() => {
+      expect(renderTranscript(driver)).toContain('Unsupported thinking effort "max" for k2. Available: off, low, high');
+    });
+    expect(renderTranscript(driver)).not.toContain('Switched to Kimi K2 with thinking max.');
   });
 });

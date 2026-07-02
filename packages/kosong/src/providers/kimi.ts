@@ -422,8 +422,7 @@ export class KimiChatProvider implements ChatProvider {
     const thinking = this._generationKwargs.extra_body?.thinking;
     if (thinking === undefined) return null;
     if (thinking.type === 'disabled') return 'off';
-    // `support_efforts` is the single source of truth for efforts: a
-    // model that sends thinking without an effort is a boolean ("on") model.
+    // A model that enables thinking without an effort is treated as boolean ("on").
     return thinking.effort ?? 'on';
   }
 
@@ -514,13 +513,12 @@ export class KimiChatProvider implements ChatProvider {
     if (effort === 'off') {
       thinking = { type: 'disabled' };
     } else {
-      // `support_efforts` is the single source of truth for efforts: only
-      // values the model declared are sent as effort. Everything else
-      // ('on', 'xhigh', or any unrecognized string) is normalized to "no
-      // effort" — thinking is enabled but the model picks its own effort.
-      const declared = this._supportEfforts.includes(effort) ? effort : undefined;
-      thinking =
-        declared !== undefined ? { type: 'enabled', effort: declared } : { type: 'enabled' };
+      // Only efforts the model explicitly declares via `support_efforts` are
+      // sent on the wire. When `support_efforts` is absent/empty, or the
+      // requested effort is not declared, only thinking.type is sent.
+      thinking = this._supportEfforts.includes(effort)
+        ? { type: 'enabled', effort }
+        : { type: 'enabled' };
     }
     // Replace extra_body.thinking wholesale so a stale `effort` from a previous
     // withThinking call can never linger on a disabled or non-effort thinking

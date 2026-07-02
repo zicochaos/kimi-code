@@ -1,4 +1,5 @@
 import type { Session } from '@moonshot-ai/kimi-code-sdk';
+import { compressImageForModel } from '@moonshot-ai/kimi-code-sdk';
 
 import { ClipboardMediaError, readClipboardMedia } from '#/utils/clipboard/clipboard-image';
 import { parseImageMeta } from '#/utils/image/image-mime';
@@ -64,6 +65,43 @@ export class EditorKeyboardController {
     editor.onChange = (text: string) => {
       if (this.pendingExit) this.clearPendingExit();
       host.updateEditorBorderHighlight(text);
+    };
+
+    // bash mode recalls only shell (`!`-prefixed) history entries; prompt mode
+    // recalls everything. The filter is locked to the mode captured when the
+    // user first enters history browsing (see onHistoryDraftSave), so landing on
+    // a shell entry mid-browse doesn't switch the filter to shell-only.
+    let browseMode: 'prompt' | 'bash' | null = null;
+    editor.setHistoryFilter((entry: string) => {
+      const mode = browseMode ?? editor.inputMode;
+      return mode === 'bash' ? entry.startsWith('!') : true;
+    });
+
+    // Recalling a `!`-prefixed entry strips the marker and returns to bash
+    // mode; recalling a plain entry returns to prompt mode. The filter above
+    // guarantees bash mode only ever lands on `!` entries, so this never
+    // misfires on commands typed in bash mode.
+    editor.onRecall = (entry: string) => {
+      if (entry.startsWith('!')) {
+        editor.setInputMode('bash');
+        return entry.slice(1);
+      }
+      editor.setInputMode('prompt');
+      return undefined;
+    };
+
+    // Save/restore the input mode alongside pi-tui's history draft. Without
+    // this, recalling a shell entry and then pressing Down back to an empty
+    // draft would leave the editor stuck in bash mode, so the next typed
+    // message would be submitted as a shell command. Also locks the history
+    // filter (browseMode) for the duration of the browse session.
+    editor.onHistoryDraftSave = () => {
+      browseMode = editor.inputMode;
+      return editor.inputMode;
+    };
+    editor.onHistoryDraftRestore = (state: unknown) => {
+      editor.setInputMode(state as 'prompt' | 'bash');
+      browseMode = null;
     };
 
     editor.onNonEscapeInput = () => {
@@ -283,6 +321,11 @@ export class EditorKeyboardController {
     this.pendingExit = null;
   }
 
+  dispose(): void {
+    this.clearPendingExit();
+    this.clearPendingUndoEsc();
+  }
+
   private armPendingUndoEsc(): void {
     this.clearPendingUndoEsc();
     const timer = setTimeout(() => {
@@ -360,7 +403,19 @@ export class EditorKeyboardController {
 
     const meta = parseImageMeta(media.bytes);
     if (meta === null) return false;
-    const attachment = this.imageStore.addImage(media.bytes, meta.mime, meta.width, meta.height);
+    // Compress at ingestion — a pure data step while building the attachment, so
+    // the stored bytes, the inline thumbnail, the `[image #N (W×H)]` placeholder,
+    // and the submitted image all agree, and the agent core only ever sees an
+    // already-compressed image. Best effort: originals pass through on failure.
+    const compressed = await compressImageForModel(media.bytes, meta.mime);
+    const attachment = compressed.changed
+      ? this.imageStore.addImage(
+          compressed.data,
+          compressed.mimeType,
+          compressed.width,
+          compressed.height,
+        )
+      : this.imageStore.addImage(media.bytes, meta.mime, meta.width, meta.height);
     this.host.state.editor.insertTextAtCursor?.(`${attachment.placeholder} `);
     this.host.state.ui.requestRender();
     this.host.track('shortcut_paste', { kind: 'image' });

@@ -716,7 +716,7 @@ describe('KimiChatProvider', () => {
   });
 
   describe('with thinking', () => {
-    it('non-effort model sends only thinking.type (no effort, no reasoning_effort)', async () => {
+    it('model without support_efforts omits effort', async () => {
       const provider = createProvider().withThinking('high');
       const history: Message[] = [
         { role: 'user', content: [{ type: 'text', text: 'Think' }], toolCalls: [] },
@@ -785,12 +785,13 @@ describe('KimiChatProvider', () => {
       expect(provider.withThinking('off').thinkingEffort).toBe('off');
     });
 
-    it('thinkingEffort returns on for an enabled boolean (non-effort) model', () => {
+    it("thinkingEffort falls back to 'on' when support_efforts is absent", () => {
       const provider = createProvider();
-      // A model without support_efforts carries no effort on the wire, so the
-      // getter falls back to 'on' regardless of the requested effort.
+      // Without declared efforts the wire object carries no `effort`, so the
+      // getter reports boolean-thinking ("on") for any non-off effort.
       expect(provider.withThinking('high').thinkingEffort).toBe('on');
       expect(provider.withThinking('on').thinkingEffort).toBe('on');
+      expect(provider.withThinking('off').thinkingEffort).toBe('off');
     });
 
     it('replaces the previous thinking effort when called again', () => {
