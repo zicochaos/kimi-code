@@ -387,6 +387,7 @@ export class SessionReplayRenderer {
     const { streamingUI } = this.host;
     const thinking = context.assistant.thinking.join('');
     const text = context.assistant.text.join('');
+    const hasVisibleText = text.trim().length > 0;
     context.assistant = { thinking: [], text: [] };
     this.applyStepContext(context);
 
@@ -394,7 +395,7 @@ export class SessionReplayRenderer {
       streamingUI.onThinkingUpdate(thinking);
       streamingUI.onThinkingEnd();
     }
-    if (text.length > 0) {
+    if (hasVisibleText) {
       streamingUI.onStreamingTextStart();
       streamingUI.onStreamingTextUpdate(text);
       streamingUI.onStreamingTextEnd();

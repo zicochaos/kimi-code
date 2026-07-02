@@ -690,6 +690,40 @@ describe('KimiTUI resume message replay', () => {
     expect(transcript).not.toContain('thought');
   });
 
+  it('compacts replayed thinking before tool calls when text is whitespace-only', async () => {
+    const replay: AgentReplayRecord[] = [
+      message('user', [{ type: 'text', text: 'read after whitespace thinking' }]),
+      message(
+        'assistant',
+        [
+          {
+            type: 'think',
+            think: ['line1', 'line2', 'line3', 'line4', 'line5', 'line6', 'line7'].join('\n'),
+          },
+          { type: 'text', text: '   \n\t' },
+        ],
+        {
+          toolCalls: [
+            toolCall('call_read', 'Read', { file_path: '/tmp/proj-a/src/a.ts' }),
+          ],
+        },
+      ),
+      message('tool', [{ type: 'text', text: 'line a\nline b\n' }], {
+        toolCallId: 'call_read',
+      }),
+    ];
+
+    const driver = await replayIntoDriver(replay);
+    const transcript = stripAnsi(driver.state.transcriptContainer.render(120).join('\n'));
+    expect(transcript).toContain('line1');
+    expect(transcript).toContain('line2');
+    expect(transcript).not.toContain('line7');
+    expect(transcript).toContain('... (5 more lines, ctrl+o to expand)');
+    expect(transcript).toContain('Used Read');
+    expect(transcript).toContain('src');
+    expect(transcript).not.toContain('thought');
+  });
+
   it('renders replayed AgentSwarm calls as compact result summaries', async () => {
     const replay: AgentReplayRecord[] = [
       message('user', [{ type: 'text', text: 'review files with a swarm' }]),
