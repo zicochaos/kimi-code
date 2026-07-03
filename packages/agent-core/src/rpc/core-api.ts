@@ -201,7 +201,7 @@ export interface CancelPayload {
   readonly turnId?: number;
 }
 export interface SetThinkingPayload {
-  readonly level: string;
+  readonly effort: string;
 }
 export interface SetPermissionPayload {
   readonly mode: PermissionMode;
@@ -431,6 +431,7 @@ export interface SessionAPI extends AgentAPIWithId {
   reconnectMcpServer: (payload: ReconnectMcpServerPayload) => void;
   generateAgentsMd: (payload: EmptyPayload) => void;
   getSessionWarnings: (payload: EmptyPayload) => readonly SessionWarning[];
+  waitForBackgroundTasksOnPrint: (payload: EmptyPayload) => void;
   addAdditionalDir: (payload: AddAdditionalDirPayload) => AddAdditionalDirResult;
 }
 

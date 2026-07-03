@@ -32,6 +32,7 @@ import type {
   SessionUsage,
   SkillSummary,
   PluginCommandDef,
+  ThinkingEffort,
   Unsubscribe,
 } from '#/types';
 
@@ -194,14 +195,14 @@ export class Session {
     await this.rpc.setModel({ sessionId: this.id, model: normalized });
   }
 
-  async setThinking(level: string): Promise<void> {
+  async setThinking(effort: ThinkingEffort): Promise<void> {
     this.ensureOpen();
     const normalized = normalizeRequiredString(
-      level,
-      'Session thinking level cannot be empty',
+      effort,
+      'Session thinking effort cannot be empty',
       ErrorCodes.SESSION_THINKING_EMPTY,
     );
-    await this.rpc.setThinking({ sessionId: this.id, level: normalized });
+    await this.rpc.setThinking({ sessionId: this.id, effort: normalized });
   }
 
   async setPermission(mode: PermissionMode): Promise<void> {
@@ -374,6 +375,18 @@ export class Session {
       sessionId: this.id,
       taskId: trimmedTaskId,
     });
+  }
+
+  /**
+   * Block until every still-running background task (across all agents in this
+   * session) reaches a terminal state. Used by `kimi -p` after the main agent's
+   * turn finishes when `background.keep_alive_on_exit` is `true`, so background
+   * subagents get a chance to complete before the process exits. No-op when
+   * `keep_alive_on_exit` is not enabled. Bounded by `background.print_wait_ceiling_s`.
+   */
+  async waitForBackgroundTasksOnPrint(): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.waitForBackgroundTasksOnPrint({ sessionId: this.id });
   }
 
   // --- Goal lifecycle ---------------------------------------------------
