@@ -45,10 +45,15 @@ import Icon from './components/ui/Icon.vue';
 // Hydrate the server-transport credential (fragment token or sessionStorage)
 // BEFORE the client connects, so the first REST/WS calls already carry it.
 const hasServerCredential = initServerAuth();
-const showServerAuth = ref(!hasServerCredential);
+const authRequired = ref(!hasServerCredential);
 let offAuthRequired: (() => void) | null = null;
 
 const client = useKimiWebClient();
+// When the server runs with `--dangerous-bypass-auth`, `/meta` advertises it
+// and we skip the token prompt entirely — there is no credential to enter.
+const showServerAuth = computed(
+  () => !client.dangerousBypassAuth.value && authRequired.value,
+);
 provide('resolveImage', client.resolveImageUrl);
 const { t } = useI18n();
 
@@ -124,7 +129,10 @@ onMounted(() => {
   // conversation pane's bubble-phase handler interrupts a running prompt.
   document.addEventListener('keydown', onGlobalKeydown, true);
   offAuthRequired = onAuthRequired(() => {
-    showServerAuth.value = true;
+    authRequired.value = true;
+    // The server now demands a token, so any cached "bypass" state from a
+    // previous mode is stale — drop it so the token prompt can show.
+    client.clearDangerousBypassAuth();
   });
 });
 
@@ -369,10 +377,13 @@ async function handleLoginSuccess(): Promise<void> {
 
 // Edit + resend the last user message: undo the latest exchange on the daemon,
 // then drop that message's text back into the composer for editing.
-async function handleEditMessage(text: string): Promise<void> {
+async function handleEditMessage(payload: {
+  text: string;
+  images?: { url: string; alt?: string; kind: 'image' | 'video'; fileId?: string }[];
+}): Promise<void> {
   await client.undo(1);
   await nextTick();
-  conversationPaneRef.value?.loadComposerForEdit(text);
+  conversationPaneRef.value?.loadComposerForEdit(payload.text, payload.images);
 }
 
 // Handler for slash commands emitted by Composer (via ConversationPane)
