@@ -710,6 +710,13 @@ effort = "medium"
     const resumed = await harness.resumeSession({ id: session.id, kaos });
 
     expect(resumed).toBe(session);
+    expect(resumed.summary?.additionalDirs).toEqual([]);
+    expect(resumed.getResumeState()).toMatchObject({
+      sessionMetadata: {
+        title: '',
+      },
+      agents: {},
+    });
     expect(rpc.resumeCalls).toHaveLength(1);
     expect(rpc.resumeCalls[0]).toMatchObject({
       input: { id: 'ses_active' },
@@ -738,6 +745,13 @@ effort = "medium"
     });
 
     expect(resumed).toBe(session);
+    expect(resumed.summary?.additionalDirs).toEqual(['/tmp/extra']);
+    expect(resumed.getResumeState()).toMatchObject({
+      sessionMetadata: {
+        title: '',
+      },
+      agents: {},
+    });
     expect(rpc.plainResumeCalls).toEqual([
       {
         id: 'ses_active_dirs',

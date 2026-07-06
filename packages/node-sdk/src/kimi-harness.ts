@@ -22,6 +22,7 @@ import type {
   ListSessionsOptions,
   RenameSessionInput,
   ResumeSessionInput,
+  ResumedSessionSummary,
   ReloadSessionInput,
   SessionSummary,
   TelemetryClient,
@@ -118,10 +119,14 @@ export class KimiHarness {
     const active = this.activeSessions.get(id);
     const { kaos, persistenceKaos, sessionStartedProperties, ...resumeInput } = input;
     if (active !== undefined) {
+      let summary: ResumedSessionSummary | undefined;
       if (kaos !== undefined || persistenceKaos !== undefined) {
-        await this.rpc.resumeSessionWithKaos({ ...resumeInput, id }, kaos ?? persistenceKaos as Kaos, persistenceKaos);
+        summary = await this.rpc.resumeSessionWithKaos({ ...resumeInput, id }, kaos ?? persistenceKaos as Kaos, persistenceKaos);
       } else if (resumeInput.additionalDirs !== undefined) {
-        await this.rpc.resumeSession({ ...resumeInput, id });
+        summary = await this.rpc.resumeSession({ ...resumeInput, id });
+      }
+      if (summary !== undefined) {
+        active.updateSummary(summary);
       }
       return active;
     }
