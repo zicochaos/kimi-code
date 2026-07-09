@@ -44,7 +44,11 @@ import { createKimiCodeHostIdentity } from './version';
  *
  * Used to bound shutdown so a wedged cleanup step can't keep a completed
  * headless run alive, without silently swallowing a cleanup that fails fast. The
- * timer is unref'd so it never keeps the loop alive on its own.
+ * timer stays ref'd so a cleanup step that suspends on an unref'd handle (e.g.
+ * telemetry's retry backoff when the network is blocked) can't drain the event
+ * loop and exit 0 before the rejection propagates — the timer keeps the loop
+ * alive until it fires, then gives the rejection a chance to surface. A wedged
+ * cleanup is still bounded by `timeoutMs`, so this can't hang the run forever.
  */
 async function raceWithTimeout(promise: Promise<void>, timeoutMs: number): Promise<void> {
   let timedOut = false;
@@ -61,7 +65,6 @@ async function raceWithTimeout(promise: Promise<void>, timeoutMs: number): Promi
       timedOut = true;
       resolve();
     }, timeoutMs);
-    timer.unref?.();
   });
   try {
     await Promise.race([guarded, timedOutSignal]);
@@ -231,7 +234,7 @@ async function runHeadlessGoal(
   try {
     // The objective is sent as the normal prompt; goal continuation keeps the
     // turn alive until a terminal state is reached.
-    await runPromptTurn(session, goal.objective, outputFormat, stdout, stderr);
+    await runPromptTurn(session, goal.objective, outputFormat, stdout, stderr, true);
   } finally {
     unsubscribeGoalEvents();
     const snapshot = completedSnapshot ?? (await session.getGoal()).goal;
@@ -429,9 +432,11 @@ function runPromptTurn(
   outputFormat: PromptOutputFormat,
   stdout: PromptOutput,
   stderr: PromptOutput,
+  waitForGoalTerminal = false,
 ): Promise<void> {
   let activeTurnId: number | undefined;
   let activeAgentId: string | undefined;
+  let latestStartedTurnId: number | undefined;
   const outputWriter =
     outputFormat === 'stream-json'
       ? new PromptJsonWriter(stdout)
@@ -466,6 +471,18 @@ function runPromptTurn(
         }
         activeTurnId = event.turnId;
         activeAgentId = event.agentId;
+        latestStartedTurnId = event.turnId;
+        return;
+      }
+      if (
+        waitForGoalTerminal &&
+        event.type === 'goal.updated' &&
+        event.agentId === PROMPT_MAIN_AGENT_ID &&
+        activeTurnId === undefined &&
+        event.snapshot !== null &&
+        event.snapshot.status !== 'active'
+      ) {
+        void finishCompletedTurn();
         return;
       }
       if (
@@ -512,19 +529,29 @@ function runPromptTurn(
           return;
         case 'turn.ended':
           if (event.reason === 'completed') {
-            void (async () => {
-              // Flush the buffered assistant message before draining background
-              // tasks: in stream-json mode the final message is only emitted by
-              // finish(), so a long background wait would otherwise withhold the
-              // main turn's result until the drain settles.
-              outputWriter.flushAssistant();
-              try {
-                await session.waitForBackgroundTasksOnPrint();
-              } catch (error) {
-                log.warn('waitForBackgroundTasksOnPrint failed', { error });
-              }
-              finish();
-            })();
+            outputWriter.flushAssistant();
+            if (waitForGoalTerminal) {
+              const completedTurnId = event.turnId;
+              activeTurnId = undefined;
+              activeAgentId = undefined;
+              void (async () => {
+                try {
+                  const { goal } = await session.getGoal();
+                  if (
+                    activeTurnId !== undefined ||
+                    latestStartedTurnId !== completedTurnId
+                  ) {
+                    return;
+                  }
+                  if (goal?.status === 'active') return;
+                  await finishCompletedTurn();
+                } catch (error) {
+                  finish(error instanceof Error ? error : new Error(String(error)));
+                }
+              })();
+              return;
+            }
+            void finishCompletedTurn();
             return;
           }
           finish(new Error(formatTurnEndedFailure(event)));
@@ -557,6 +584,20 @@ function runPromptTurn(
     session.prompt(prompt).catch((error: unknown) => {
       finish(error instanceof Error ? error : new Error(String(error)));
     });
+
+    async function finishCompletedTurn(): Promise<void> {
+      // Flush the buffered assistant message before draining background tasks:
+      // in stream-json mode the final message is only emitted by finish(), so a
+      // long background wait would otherwise withhold the main turn's result
+      // until the drain settles.
+      outputWriter.flushAssistant();
+      try {
+        await session.waitForBackgroundTasksOnPrint();
+      } catch (error) {
+        log.warn('waitForBackgroundTasksOnPrint failed', { error });
+      }
+      finish();
+    }
   });
 }
 
@@ -607,7 +648,9 @@ class PromptTranscriptWriter implements PromptTurnWriter {
 
   writeToolResult(): void {}
 
-  flushAssistant(): void {}
+  flushAssistant(): void {
+    this.assistantWriter.finish();
+  }
 
   discardAssistant(): void {}
 

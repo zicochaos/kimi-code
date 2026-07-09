@@ -317,6 +317,8 @@ export class ToolManager {
               return mcpResultToExecutableOutput(result, qualified, {
                 originalsDir: this.agent.mediaOriginalsDir,
                 telemetry: this.agent.telemetry,
+                // Resolved per call so a config reload applies immediately.
+                maxImageEdgePx: this.agent.imageLimits?.maxEdgePx(),
               });
             },
           };
@@ -555,8 +557,8 @@ export class ToolManager {
    * defer-window pending set. History is the single source of truth, so the
    * ledger survives resume (records replay rebuilds the history), keeps its
    * state across undo (schema messages have `injection` origin and are not
-   * undone), and self-heals after compaction (the rebuild message re-carries
-   * the schemas).
+   * undone), and empties at compaction (schema messages are discarded with
+   * the folded history — the model re-selects what it still needs).
    */
   loadedDynamicToolNames(): ReadonlySet<string> {
     const names = collectLoadedDynamicToolNames(this.agent.context.history);
@@ -580,12 +582,11 @@ export class ToolManager {
   }
 
   /**
-   * Compaction rebuilt the history: from here on the keep-all rebuild message
-   * (which may have trimmed or skipped schemas — budget guard, disconnected
-   * servers) is the sole truth about what is still loaded. A pending entry
-   * surviving past this boundary would report a schema the context no longer
-   * carries as loaded, and re-selecting it would wrongly answer
-   * "Already available" instead of injecting.
+   * Compaction rebuilt the history and discarded every loaded schema with it
+   * — the loaded set is empty from here on. A pending entry surviving past
+   * this boundary would report a schema the context no longer carries as
+   * loaded, and re-selecting it would wrongly answer "Already available"
+   * instead of injecting.
    */
   onContextCompacted(): void {
     this.pendingLoadedDynamicTools.clear();
@@ -707,6 +708,7 @@ export class ToolManager {
             modelCapabilities,
             videoUploader,
             this.agent.telemetry,
+            this.agent.imageLimits,
           ),
         new b.EnterPlanModeTool(this.agent),
         new b.ExitPlanModeTool(this.agent),
