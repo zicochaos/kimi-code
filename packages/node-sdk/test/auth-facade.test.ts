@@ -226,6 +226,31 @@ api_key = "YOUR_API_KEY"
     });
   });
 
+  it('reports env-backed API-key providers as authenticated', async () => {
+    await writeFile(
+      join(homeDir, 'config.toml'),
+      `
+[providers."moonshot-env"]
+type = "kimi"
+base_url = "https://api.example.test/v1"
+
+[providers."moonshot-env".env]
+KIMI_API_KEY = "YOUR_API_KEY"
+`,
+    );
+    const harness = createKimiHarness({ homeDir, identity: TEST_IDENTITY });
+
+    await expect(harness.auth.status()).resolves.toEqual({
+      providers: [
+        { providerName: KIMI_CODE_PROVIDER_NAME, hasToken: false },
+        { providerName: 'moonshot-env', hasToken: true },
+      ],
+    });
+    await expect(harness.auth.status('moonshot-env')).resolves.toEqual({
+      providers: [{ providerName: 'moonshot-env', hasToken: true }],
+    });
+  });
+
   it('does not duplicate a provider with both OAuth and an API key', async () => {
     await new FileTokenStorage(join(homeDir, 'credentials')).save('kimi-code', freshToken());
     await writeFile(

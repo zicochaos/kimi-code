@@ -5,6 +5,7 @@ import {
   writeConfigFile,
   type KimiConfig,
   type OAuthRef,
+  type ProviderConfig,
 } from '@moonshot-ai/agent-core';
 import {
   applyManagedKimiCodeConfig,
@@ -126,7 +127,7 @@ export class KimiAuthFacade {
     const config = loadRuntimeConfigSafe(this.options.configPath).config;
     const apiKeyProviderNames = new Set(
       Object.entries(config.providers)
-        .filter(([, provider]) => provider.apiKey?.trim().length)
+        .filter(([, provider]) => hasConfiguredApiKey(provider))
         .map(([name]) => name),
     );
     const providers = status.providers.map((entry) => {
@@ -335,4 +336,29 @@ export class KimiAuthFacade {
       configuredOAuthRef: oauthRef ?? auth.oauthRef,
     }).oauthRef;
   }
+}
+
+function hasConfiguredApiKey(provider: ProviderConfig): boolean {
+  if (nonEmpty(provider.apiKey)) return true;
+
+  switch (provider.type) {
+    case 'anthropic':
+      return nonEmpty(provider.env?.['ANTHROPIC_API_KEY']);
+    case 'openai':
+    case 'openai_responses':
+      return nonEmpty(provider.env?.['OPENAI_API_KEY']);
+    case 'kimi':
+      return nonEmpty(provider.env?.['KIMI_API_KEY']);
+    case 'google-genai':
+      return nonEmpty(provider.env?.['GOOGLE_API_KEY']);
+    case 'vertexai':
+      return (
+        nonEmpty(provider.env?.['VERTEXAI_API_KEY']) ||
+        nonEmpty(provider.env?.['GOOGLE_API_KEY'])
+      );
+  }
+}
+
+function nonEmpty(value: string | undefined): boolean {
+  return (value?.trim().length ?? 0) > 0;
 }
