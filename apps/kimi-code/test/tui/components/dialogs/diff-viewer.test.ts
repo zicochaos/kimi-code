@@ -51,6 +51,44 @@ describe('DiffViewerComponent', () => {
     expect(onToggleExpand).toHaveBeenCalledWith(true);
   });
 
+  it('requests a render after async expansion finishes', async () => {
+    const onToggleExpand = vi.fn().mockResolvedValue(['expanded line']);
+    const requestRender = vi.fn();
+    const component = new DiffViewerComponent({
+      initialLines: ['collapsed line'],
+      onToggleExpand,
+      onBack: vi.fn(),
+      requestRender,
+    });
+
+    component.handleInput('\u000F'); // ctrl+o
+
+    await vi.waitFor(() => {
+      const output = component.render(40).map(strip);
+      expect(output.some((line) => line.includes('expanded line'))).toBe(true);
+    });
+    expect(requestRender).toHaveBeenCalled();
+  });
+
+  it('requests a render after an expand failure', async () => {
+    const onToggleExpand = vi.fn().mockRejectedValue(new Error('boom'));
+    const requestRender = vi.fn();
+    const component = new DiffViewerComponent({
+      initialLines: ['collapsed line'],
+      onToggleExpand,
+      onBack: vi.fn(),
+      requestRender,
+    });
+
+    component.handleInput('\u000F'); // ctrl+o
+
+    await vi.waitFor(() => {
+      const output = component.render(40).map(strip);
+      expect(output.some((line) => line.includes('Failed to load expanded diff'))).toBe(true);
+    });
+    expect(requestRender).toHaveBeenCalled();
+  });
+
   it('resets toggling state after an expand failure so ctrl+o remains usable', async () => {
     const onToggleExpand = vi.fn().mockRejectedValue(new Error('boom'));
     const component = new DiffViewerComponent({

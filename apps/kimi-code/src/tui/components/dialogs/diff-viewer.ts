@@ -28,6 +28,12 @@ export interface DiffViewerOptions {
   readonly onToggleExpand?: (
     expanded: boolean,
   ) => Promise<readonly string[]> | readonly string[];
+  /**
+   * Called after async expansion finishes so the host can request a render.
+   * Without this, expanded/collapsed content may not appear until the next
+   * input event.
+   */
+  readonly requestRender?: () => void;
 }
 
 export class DiffViewerComponent implements Component, Focusable {
@@ -60,11 +66,13 @@ export class DiffViewerComponent implements Component, Focusable {
         .then((lines) => {
           this.expanded = nextExpanded;
           this.setLines(lines);
+          this.opts.requestRender?.();
         })
         .catch((error: unknown) => {
           this.setLines([
             currentTheme.fg('diffRemoved', `Failed to load expanded diff: ${formatErrorMessage(error)}`),
           ]);
+          this.opts.requestRender?.();
         })
         .finally(() => {
           this.toggling = false;

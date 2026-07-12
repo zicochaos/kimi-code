@@ -266,6 +266,7 @@ async function showDiffViewer(
   const viewer = new DiffViewerComponent({
     onBack,
     onToggleExpand: (expanded) => buildDiffLinesForChoice(workDir, sessionEdits, choice, expanded),
+    requestRender: () => host.state.ui.requestRender(),
   });
   host.mountEditorReplacement(viewer);
 
