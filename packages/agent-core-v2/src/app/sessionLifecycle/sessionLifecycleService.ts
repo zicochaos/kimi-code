@@ -92,6 +92,7 @@ import {
 type MaterializeSessionOptions = Omit<CreateSessionOptions, 'sessionId'> & {
   readonly sessionId: string;
   readonly workspaceId?: string;
+  readonly forkDestination?: boolean;
 };
 
 export class SessionLifecycleService extends Disposable implements ISessionLifecycleService {
@@ -205,14 +206,18 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
       if (additionalDirs.length > 0) {
         handle.accessor.get(ISessionWorkspaceContext).setAdditionalDirs(additionalDirs);
       }
-      await this.registerSessionHandle(opts.sessionId, handle);
+      await this.registerSessionHandle(opts.sessionId, handle, opts.forkDestination === true);
       await handle.accessor.get(ISessionMetadata).ready;
       void handle.accessor.get(ISessionSkillCatalog).ready;
       await handle.accessor.get(IAgentLifecycleService).ensureMcpReady();
       handle.accessor.get(ISessionExternalHooksService);
       return handle;
     } catch (error) {
-      await this.disposeFailedSession(opts.sessionId, handle);
+      if (opts.forkDestination === true) {
+        await this.rollbackFailedFork(opts.sessionId, handle, ctx.sessionDir);
+      } else {
+        await this.disposeFailedSession(opts.sessionId, handle);
+      }
       throw error;
     }
   }
@@ -396,10 +401,17 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
   private async registerSessionHandle(
     sessionId: string,
     handle: ISessionScopeHandle,
+    exclusive: boolean,
   ): Promise<void> {
     while (true) {
       const rollback = this.forkRollbacks.get(sessionId);
       if (rollback === undefined) {
+        if (exclusive && this.sessions.has(sessionId)) {
+          throw new Error2(
+            ErrorCodes.SESSION_ALREADY_EXISTS,
+            `Session "${sessionId}" already exists`,
+          );
+        }
         this.sessions.set(sessionId, handle);
         return;
       }
@@ -485,6 +497,7 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
       target = await this.materializeSession({
         sessionId: targetId,
         workDir: workspace.root,
+        forkDestination: true,
       });
       const targetCtx = target.accessor.get(ISessionContext);
       targetSessionDir = targetCtx.sessionDir;

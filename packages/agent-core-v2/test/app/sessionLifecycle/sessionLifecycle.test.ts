@@ -15,10 +15,13 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 
 import { InstantiationType } from '#/_base/di/extensions';
+import { SyncDescriptor } from '#/_base/di/descriptors';
 import { Disposable } from '#/_base/di/lifecycle';
+import { ILogService } from '#/_base/log/log';
 import {
   type IAgentScopeHandle,
   LifecycleScope,
+  type ScopeSeed,
   _clearScopedRegistryForTests,
   registerScopedService,
 } from '#/_base/di/scope';
@@ -26,6 +29,7 @@ import { type ScopedTestHost, createScopedTestHost, stubPair } from '#/_base/di/
 import { Event } from '#/_base/event';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { IConfigService } from '#/app/config/config';
+import { IFlagService } from '#/app/flag/flag';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
 import { IHostFileSystem } from '#/os/interface/hostFileSystem';
 import { HostFileSystem } from '#/os/backends/node-local/hostFsService';
@@ -50,8 +54,13 @@ import { ISessionActivity } from '#/session/sessionActivity/sessionActivity';
 import { ISessionMetadata } from '#/session/sessionMetadata/sessionMetadata';
 import { ISessionSkillCatalog } from '#/session/sessionSkillCatalog/skillCatalog';
 import { ISessionIndex, type SessionSummary } from '#/app/sessionIndex/sessionIndex';
+import { FileSessionIndex } from '#/app/sessionIndex/sessionIndexService';
+import { JsonAtomicDocumentStore } from '#/persistence/backends/node-fs/atomicDocumentStore';
+import { FileStorageService } from '#/persistence/backends/node-fs/fileStorageService';
 import { IAppendLogStore } from '#/persistence/interface/appendLogStore';
 import { IAtomicDocumentStore } from '#/persistence/interface/atomicDocumentStore';
+import { IQueryStore } from '#/persistence/interface/queryStore';
+import { IFileSystemStorageService } from '#/persistence/interface/storage';
 import { IWorkspaceLocalConfigService } from '#/app/workspaceLocalConfig/workspaceLocalConfig';
 import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
 import { SessionWorkspaceContextService } from '#/session/workspaceContext/workspaceContextService';
@@ -60,8 +69,12 @@ import { encodeWorkDirKey } from '#/_base/utils/workdir-slug';
 import { ISessionContext } from '#/session/sessionContext/sessionContext';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
 import { Error2, ErrorCodes } from '#/errors';
+import { SessionMetadata } from '#/session/sessionMetadata/sessionMetadataService';
+import { stubLog } from '../../_base/log/stubs';
 import { stubSessionActivityKernel } from '../../activity/stubs';
 import { recordingTelemetry, type TelemetryRecord } from '../../app/telemetry/stubs';
+import { stubFlag } from '../flag/stubs';
+import { stubQueryStore } from '../../persistence/interface/stubs';
 
 function bootstrapStub(): IBootstrapService {
   return {
@@ -78,6 +91,7 @@ function tmpBootstrapStub(root: string): IBootstrapService {
   return {
     sessionsDir: join(root, 'sessions'),
     homeDir: root,
+    scope: (name: string) => name,
     sessionScope: (workspaceId: string, sessionId: string) =>
       `sessions/${workspaceId}/${sessionId}`,
     sessionDir: (workspaceId: string, sessionId: string) =>
@@ -464,7 +478,7 @@ describe('SessionLifecycleService', () => {
     await Promise.all(tmpRoots.map((root) => rm(root, { recursive: true, force: true })));
   });
 
-  function build(extra: ReturnType<typeof stubPair>[] = []): ISessionLifecycleService {
+  function build(extra: ScopeSeed = []): ISessionLifecycleService {
     host = createScopedTestHost([
       stubPair(IBootstrapService, bootstrapStub()),
       stubPair(ISessionMetadata, metadataStub()),
@@ -1248,6 +1262,91 @@ describe('SessionLifecycleService', () => {
       await expect(svc.fork({ sourceSessionId: 'src', newSessionId: 'dst' })).rejects.toThrow(
         'not implemented',
       );
+    });
+
+    it('removes a fork target when materialization fails after metadata is persisted', async () => {
+      const root = await makeTmpRoot();
+      const bootstrap = tmpBootstrapStub(root);
+      const storage = new FileStorageService(root);
+      const queryStore = stubQueryStore();
+      const flags = stubFlag(false);
+      const log = stubLog();
+      const targetMcpStarted = deferred();
+      const targetMcp = deferred();
+      const failure = new Error('target MCP initialization failed');
+      let mcpAttempts = 0;
+      registerScopedService(
+        LifecycleScope.Session,
+        ISessionMetadata,
+        SessionMetadata,
+        InstantiationType.Delayed,
+        'sessionMetadata',
+      );
+      const svc = build([
+        stubPair(IBootstrapService, bootstrap),
+        workspaceGetStub(),
+        stubPair(IFileSystemStorageService, storage),
+        [IAtomicDocumentStore, new SyncDescriptor(JsonAtomicDocumentStore)],
+        stubPair(IQueryStore, queryStore),
+        stubPair(IFlagService, flags),
+        stubPair(ILogService, log),
+        [ISessionIndex, new SyncDescriptor(FileSessionIndex)],
+        stubPair(IAgentLifecycleService, {
+          ...agentLifecycleStub(),
+          ensureMcpReady: () => {
+            mcpAttempts += 1;
+            if (mcpAttempts === 2) {
+              targetMcpStarted.resolve();
+              return targetMcp.promise;
+            }
+            return Promise.resolve();
+          },
+        }),
+      ]);
+      const index = host!.app.accessor.get(ISessionIndex);
+      await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+
+      const forked = svc.fork({ sourceSessionId: 'src', newSessionId: 'dst' });
+      await targetMcpStarted.promise;
+      await expect(index.get('dst')).resolves.toMatchObject({ id: 'dst' });
+      const rejected = expect(forked).rejects.toBe(failure);
+      targetMcp.reject(failure);
+      await rejected;
+
+      await expect(stat(join(root, 'sessions', 'wd_stub', 'dst'))).rejects.toThrow();
+      await expect(index.get('dst')).resolves.toBeUndefined();
+
+      const retried = await svc.fork({ sourceSessionId: 'src', newSessionId: 'dst' });
+      expect(retried.id).toBe('dst');
+    });
+
+    it('preserves a same-id session that registers during the fork collision check', async () => {
+      const collisionCheckStarted = deferred();
+      const releaseCollisionCheck = deferred();
+      const index: ISessionIndex = {
+        ...sessionIndexStub(),
+        get: async (sessionId: string) => {
+          if (sessionId === 'dst') {
+            collisionCheckStarted.resolve();
+            await releaseCollisionCheck.promise;
+          }
+          return undefined;
+        },
+      };
+      const svc = build([workspaceGetStub(), stubPair(ISessionIndex, index)]);
+      await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+
+      const forked = svc.fork({ sourceSessionId: 'src', newSessionId: 'dst' });
+      await collisionCheckStarted.promise;
+      const replacement = await svc.create({ sessionId: 'dst', workDir: '/tmp/proj' });
+      const rejected = expect(forked).rejects.toMatchObject({
+        code: ErrorCodes.SESSION_ALREADY_EXISTS,
+      });
+      releaseCollisionCheck.resolve();
+      await rejected;
+
+      expect(svc.get('dst')).toBe(replacement);
+      expect(replacement.accessor.get(ISessionContext).sessionId).toBe('dst');
     });
 
     it('delays a same-id replacement until failed fork directory rollback finishes', async () => {
