@@ -22,6 +22,10 @@ import { LifecycleScope, registerScopedService } from '#/_base/di/scope';
 import { IAgentContextMemoryService } from '#/agent/contextMemory/contextMemory';
 import { IAgentContextProjectorService } from '#/agent/contextProjector/contextProjector';
 import { IAgentContextSizeService } from '#/agent/contextSize/contextSize';
+import {
+  IFaultInjectionService,
+  type FaultKind,
+} from '#/agent/faultInjection/faultInjection';
 import { IAgentProfileService, type ProfileModelContext } from '#/agent/profile/profile';
 import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { IAgentToolSelectService } from '#/agent/toolSelect/toolSelect';
@@ -158,6 +162,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     @ILogService private readonly log: ILogService,
     @ITelemetryService private readonly telemetry: ITelemetryService,
     @IAgentWireService private readonly wire: IWireService,
+    @IFaultInjectionService private readonly faultInjection: IFaultInjectionService,
   ) {}
 
   async request(
@@ -266,6 +271,16 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
       };
       this.logRequest(logInput);
       this.recordRequest(logInput);
+
+      // Fault injection (experimental): an armed one-shot fault replaces this
+      // attempt with a deterministic provider failure, raised exactly where a
+      // real rejection would surface — so the recovery-resend chain below
+      // handles it identically. The resend attempt consumes nothing (the
+      // latch is one-shot) and reaches the real provider.
+      const fault = this.faultInjection.take();
+      if (fault !== undefined) {
+        throw faultToError(fault);
+      }
 
       let message: Message | undefined;
       let usage = emptyUsage();
@@ -613,6 +628,15 @@ function projectionField(
   return value === 'strict' || value === 'media-degraded' || value === 'media-stripped'
     ? value
     : undefined;
+}
+
+/** The deterministic provider failure an armed fault raises. Mirrors the
+ * real rejections the recovery projections key off: an HTTP 413 body-size
+ * rejection, or a 400 image-format rejection. */
+function faultToError(kind: FaultKind): Error {
+  return kind === 'request-too-large'
+    ? new APIRequestTooLargeError(413, 'Request Entity Too Large (fault injection)')
+    : new APIStatusError(400, 'unsupported image format: image/avif (fault injection)');
 }
 
 function fingerprint(content: string): string {

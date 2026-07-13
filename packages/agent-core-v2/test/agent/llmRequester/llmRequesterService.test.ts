@@ -17,6 +17,8 @@ import { TestInstantiationService } from '#/_base/di/test';
 import { IAgentContextMemoryService } from '#/agent/contextMemory/contextMemory';
 import type { ContextMessage } from '#/agent/contextMemory/types';
 import { IAgentContextProjectorService } from '#/agent/contextProjector/contextProjector';
+import { IFaultInjectionService } from '#/agent/faultInjection/faultInjection';
+import { FaultInjectionService } from '#/agent/faultInjection/faultInjectionService';
 import { AgentLLMRequesterService } from '#/agent/llmRequester/llmRequesterService';
 import { IAgentLLMRequesterService } from '#/agent/llmRequester/llmRequester';
 import { IAgentContextSizeService } from '#/agent/contextSize/contextSize';
@@ -25,6 +27,7 @@ import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { IAgentToolSelectService } from '#/agent/toolSelect/toolSelect';
 import { IAgentUsageService } from '#/agent/usage/usage';
 import { IConfigService } from '#/app/config/config';
+import { IFlagService } from '#/app/flag/flag';
 import { APIRequestTooLargeError, APIStatusError } from '#/app/llmProtocol/errors';
 import { emptyUsage } from '#/app/llmProtocol/usage';
 import type { Message } from '#/app/llmProtocol/message';
@@ -49,7 +52,7 @@ const history: Message[] = [
   { role: 'user', content: [{ type: 'text', text: 'hello' }], toolCalls: [] },
 ];
 
-function createModel(calls: { value: number }, firstCallError?: Error): Model {
+function createModel(calls: { value: number }, firstCallError?: Error | null): Model {
   const build = (): Model => ({
     id: 'm',
     name: 'wire-model',
@@ -70,7 +73,7 @@ function createModel(calls: { value: number }, firstCallError?: Error): Model {
     withThinkingKeep: () => build(),
     request: async function* () {
       calls.value += 1;
-      if (calls.value === 1) {
+      if (calls.value === 1 && firstCallError !== null) {
         throw firstCallError ?? new APIStatusError(400, 'messages: `tool_use` ids must be unique');
       }
       yield {
@@ -97,6 +100,7 @@ function createService(
   model: Model,
   projector: Pick<IAgentContextProjectorService, 'project' | 'projectStrict'> &
     Partial<Pick<IAgentContextProjectorService, 'projectMediaDegraded' | 'projectMediaStripped'>>,
+  options: { readonly flagEnabled?: boolean } = {},
 ) {
   const ix = disposables.add(new TestInstantiationService());
   const profile: Partial<IAgentProfileService> = {
@@ -137,10 +141,12 @@ function createService(
     shapeTools: (entries) => entries,
     shapeHistory: (messages) => messages,
   };
+  const flagEnabled = options.flagEnabled ?? true;
 
   ix.stub(IAgentContextMemoryService, context);
   ix.stub(IAgentToolSelectService, toolSelect);
   ix.stub(IAgentContextProjectorService, projector);
+  ix.stub(IFlagService, { enabled: () => flagEnabled });
   ix.stub(IAgentContextSizeService, contextSize);
   ix.stub(IAgentToolRegistryService, tools);
   ix.stub(IAgentProfileService, profile);
@@ -152,9 +158,13 @@ function createService(
     IAgentWireService,
     new SyncDescriptor(WireService, [{ logScope: 'wire', logKey: 'strict-resend' }]),
   );
+  ix.set(IFaultInjectionService, new SyncDescriptor(FaultInjectionService));
   ix.set(IAgentLLMRequesterService, new SyncDescriptor(AgentLLMRequesterService));
 
-  return ix.get(IAgentLLMRequesterService);
+  return {
+    service: ix.get(IAgentLLMRequesterService),
+    faultInjection: ix.get(IFaultInjectionService),
+  };
 }
 
 describe('AgentLLMRequesterService strict resend', () => {
@@ -162,7 +172,7 @@ describe('AgentLLMRequesterService strict resend', () => {
     const calls = { value: 0 };
     let projectCalls = 0;
     let strictCalls = 0;
-    const service = createService(createModel(calls), {
+    const { service } = createService(createModel(calls), {
       project: (messages: readonly ContextMessage[]) => {
         projectCalls += 1;
         return messages;
@@ -195,7 +205,7 @@ describe('AgentLLMRequesterService strict resend', () => {
       value: () => model,
     });
     let strictCalls = 0;
-    const service = createService(model, {
+    const { service } = createService(model, {
       project: (messages: readonly ContextMessage[]) => messages,
       projectStrict: (messages: readonly ContextMessage[]) => {
         strictCalls += 1;
@@ -221,7 +231,7 @@ describe('AgentLLMRequesterService media-stripped resend', () => {
     let projectCalls = 0;
     let strictCalls = 0;
     let strippedCalls = 0;
-    const service = createService(createModel(calls, IMAGE_FORMAT_400), {
+    const { service } = createService(createModel(calls, IMAGE_FORMAT_400), {
       project: (messages: readonly ContextMessage[]) => {
         projectCalls += 1;
         return messages;
@@ -249,7 +259,7 @@ describe('AgentLLMRequesterService media-stripped resend', () => {
     const calls = { value: 0 };
     let projectCalls = 0;
     let strippedCalls = 0;
-    const service = createService(createModel(calls, IMAGE_FORMAT_400), {
+    const { service } = createService(createModel(calls, IMAGE_FORMAT_400), {
       project: (messages: readonly ContextMessage[]) => {
         projectCalls += 1;
         return messages;
@@ -279,7 +289,7 @@ describe('AgentLLMRequesterService media-stripped resend', () => {
   it('does not resend for an unrelated 400', async () => {
     const calls = { value: 0 };
     let strippedCalls = 0;
-    const service = createService(
+    const { service } = createService(
       createModel(calls, new APIStatusError(400, 'some other validation problem')),
       {
         project: (messages: readonly ContextMessage[]) => messages,
@@ -305,7 +315,7 @@ describe('AgentLLMRequesterService media-degraded resend', () => {
     let projectCalls = 0;
     let degradedCalls = 0;
     let strippedCalls = 0;
-    const service = createService(createModel(calls, BODY_TOO_LARGE_413), {
+    const { service } = createService(createModel(calls, BODY_TOO_LARGE_413), {
       project: (messages: readonly ContextMessage[]) => {
         projectCalls += 1;
         return messages;
@@ -334,7 +344,7 @@ describe('AgentLLMRequesterService media-degraded resend', () => {
     const calls = { value: 0 };
     let projectCalls = 0;
     let degradedCalls = 0;
-    const service = createService(createModel(calls, BODY_TOO_LARGE_413), {
+    const { service } = createService(createModel(calls, BODY_TOO_LARGE_413), {
       project: (messages: readonly ContextMessage[]) => {
         projectCalls += 1;
         return messages;
@@ -367,7 +377,7 @@ describe('AgentLLMRequesterService media-degraded resend', () => {
     ]) {
       const calls = { value: 0 };
       let degradedCalls = 0;
-      const service = createService(createModel(calls, error), {
+      const { service } = createService(createModel(calls, error), {
         project: (messages: readonly ContextMessage[]) => messages,
         projectStrict: (messages: readonly ContextMessage[]) => messages,
         projectMediaDegraded: (messages: readonly ContextMessage[]) => {
@@ -380,5 +390,73 @@ describe('AgentLLMRequesterService media-degraded resend', () => {
       expect(calls.value).toBe(1);
       expect(degradedCalls).toBe(0);
     }
+  });
+});
+
+describe('AgentLLMRequesterService fault injection (experimental)', () => {
+  it('raises an armed request-too-large fault before the provider and recovers via the degraded resend', async () => {
+    const calls = { value: 0 };
+    let projectCalls = 0;
+    let degradedCalls = 0;
+    const { service, faultInjection } = createService(createModel(calls, null), {
+      project: (messages: readonly ContextMessage[]) => {
+        projectCalls += 1;
+        return messages;
+      },
+      projectStrict: (messages: readonly ContextMessage[]) => messages,
+      projectMediaDegraded: (messages: readonly ContextMessage[]) => {
+        degradedCalls += 1;
+        return messages;
+      },
+    });
+
+    faultInjection.arm('request-too-large');
+    expect(faultInjection.status().armed).toBe('request-too-large');
+
+    const result = await service.request({ source: { type: 'turn', turnId: 1, step: 1 } });
+
+    // The fault fired before the provider was contacted, so the model only
+    // ever saw the degraded resend.
+    expect(result.message.content).toEqual([{ type: 'text', text: 'ok' }]);
+    expect(calls.value).toBe(1);
+    expect(projectCalls).toBe(1);
+    expect(degradedCalls).toBe(1);
+    expect(faultInjection.status()).toEqual({
+      armed: undefined,
+      fired: ['request-too-large'],
+    });
+  });
+
+  it('raises an armed image-format fault and recovers via the stripped resend, one-shot only', async () => {
+    const calls = { value: 0 };
+    let strippedCalls = 0;
+    const { service, faultInjection } = createService(createModel(calls, null), {
+      project: (messages: readonly ContextMessage[]) => messages,
+      projectStrict: (messages: readonly ContextMessage[]) => messages,
+      projectMediaStripped: (messages: readonly ContextMessage[]) => {
+        strippedCalls += 1;
+        return messages;
+      },
+    });
+
+    faultInjection.arm('image-format');
+    await service.request({ source: { type: 'turn', turnId: 1, step: 1 } });
+    expect(strippedCalls).toBe(1);
+    expect(faultInjection.status().fired).toEqual(['image-format']);
+
+    // One-shot: the next request fires nothing and builds normally.
+    const result = await service.request({ source: { type: 'turn', turnId: 2, step: 1 } });
+    expect(result.message.content).toEqual([{ type: 'text', text: 'ok' }]);
+    expect(faultInjection.status().fired).toEqual(['image-format']);
+  });
+
+  it('refuses to arm when the fault-injection flag is disabled', () => {
+    const { faultInjection } = createService(createModel({ value: 0 }, null), {
+      project: (messages: readonly ContextMessage[]) => messages,
+      projectStrict: (messages: readonly ContextMessage[]) => messages,
+    }, { flagEnabled: false });
+
+    expect(() => faultInjection.arm('request-too-large')).toThrow(/disabled/);
+    expect(faultInjection.status()).toEqual({ armed: undefined, fired: [] });
   });
 });
