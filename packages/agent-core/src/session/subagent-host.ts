@@ -6,7 +6,7 @@ import {
 
 import type { Agent } from '../agent';
 import type { PromptOrigin } from '../agent/context';
-import { ErrorCodes, type KimiErrorPayload } from '../errors';
+import { ErrorCodes } from '../errors';
 import { DenyAllPermissionPolicy } from '../agent/permission/policies/deny-all';
 import { InMemoryAgentRecordPersistence } from '../agent/records';
 import { isAbortError } from '../loop/errors';
@@ -23,14 +23,53 @@ import { collectGitContext } from './git-context';
 import type { Session } from './index';
 import {
   SubagentBatch,
+  resolveSwarmMaxConcurrency,
   type SubagentResult,
   type SubagentSuspendedEvent,
   type QueuedSubagentTask,
 } from './subagent-batch';
 import SUMMARY_CONTINUATION_PROMPT from './summary-continuation.md?raw';
 
-export const DEFAULT_SUBAGENT_TIMEOUT_MS = 30 * 60 * 1000;
-export const DEFAULT_SUBAGENT_TIMEOUT_DESCRIPTION = '30 minutes';
+export const DEFAULT_SUBAGENT_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+export const DEFAULT_SUBAGENT_TIMEOUT_DESCRIPTION = '2 hours';
+
+const SUBAGENT_TIMEOUT_ENV = 'KIMI_SUBAGENT_TIMEOUT_MS';
+
+/**
+ * Resolve the effective subagent per-task timeout. Precedence:
+ * `KIMI_SUBAGENT_TIMEOUT_MS` (positive integer ms) → `configMs` →
+ * `DEFAULT_SUBAGENT_TIMEOUT_MS` (30 min). Set a large value to effectively
+ * disable the cap. The value feeds the background-task manager's per-task
+ * timeout, so it governs foreground and background subagents (and AgentSwarm).
+ */
+export function resolveSubagentTimeoutMs(configMs?: number): number {
+  const raw = process.env[SUBAGENT_TIMEOUT_ENV];
+  if (raw !== undefined && raw.trim().length > 0) {
+    const parsed = Number(raw);
+    if (Number.isInteger(parsed) && parsed >= 1) return parsed;
+  }
+  if (configMs !== undefined && Number.isInteger(configMs) && configMs >= 1) {
+    return configMs;
+  }
+  return DEFAULT_SUBAGENT_TIMEOUT_MS;
+}
+
+/** Human-readable duration for the subagent timeout message. */
+export function formatSubagentTimeoutDescription(ms: number): string {
+  if (ms % (60 * 60 * 1000) === 0) {
+    const h = ms / (60 * 60 * 1000);
+    return `${h} hour${h === 1 ? '' : 's'}`;
+  }
+  if (ms % (60 * 1000) === 0) {
+    const m = ms / (60 * 1000);
+    return `${m} minute${m === 1 ? '' : 's'}`;
+  }
+  if (ms % 1000 === 0) {
+    const s = ms / 1000;
+    return `${s} second${s === 1 ? '' : 's'}`;
+  }
+  return `${ms} ms`;
+}
 
 export type {
   SubagentResult as QueuedSubagentRunResult,
@@ -101,7 +140,7 @@ export class SessionSubagentHost {
     string,
     {
       readonly controller: AbortController;
-      readonly runInBackground: boolean;
+      runInBackground: boolean;
     }
   >();
 
@@ -196,7 +235,8 @@ export class SessionSubagentHost {
   }
 
   async runQueued<T>(tasks: readonly QueuedSubagentTask<T>[]): Promise<Array<SubagentResult<T>>> {
-    return new SubagentBatch(this, tasks).run();
+    const maxConcurrency = resolveSwarmMaxConcurrency();
+    return new SubagentBatch(this, tasks, { maxConcurrency }).run();
   }
 
   suspended(event: SubagentSuspendedEvent): void {
@@ -221,7 +261,7 @@ export class SessionSubagentHost {
 
     child.config.update({
       modelAlias: parent.config.modelAlias,
-      thinkingLevel: parent.config.thinkingLevel,
+      thinkingEffort: parent.config.thinkingEffort,
       systemPrompt: parent.config.systemPrompt,
     });
     child.tools.copyLoopToolsFrom(parent.tools);
@@ -244,6 +284,11 @@ export class SessionSubagentHost {
       // subagent's in-flight tools report the cause accurately to the model.
       child.controller.abort(reason);
     }
+  }
+
+  markActiveChildDetached(agentId: string): void {
+    const child = this.activeChildren.get(agentId);
+    if (child !== undefined) child.runInBackground = true;
   }
 
   async getProfileName(agentId: string): Promise<string | undefined> {
@@ -359,14 +404,15 @@ export class SessionSubagentHost {
     child.config.update({
       cwd: parent.config.cwd,
       modelAlias: parent.config.modelAlias,
-      thinkingLevel: parent.config.thinkingLevel,
+      thinkingEffort: parent.config.thinkingEffort,
     });
 
     const context = await prepareSystemPromptContext(
       this.session.systemContextKaos(child.kaos.getcwd()),
       this.session.options.kimiHomeDir,
+      { additionalDirs: child.getAdditionalDirs() },
     );
-    child.useProfile(profile, context);
+    child.useProfile(profile, context, this.session.options.kimiHomeDir);
     child.tools.inheritUserTools(parent.tools);
   }
 
@@ -461,6 +507,9 @@ async function runChildTurnToCompletion(child: Agent, signal: AbortSignal): Prom
   const completion = await child.turn.waitForCurrentTurn(signal);
   const turnEnded = completion.event;
   if (turnEnded.reason !== 'completed') {
+    if (turnEnded.error?.code === ErrorCodes.PROVIDER_FILTERED) {
+      throw new Error('Subagent turn blocked by provider safety policy');
+    }
     if (turnEnded.error?.code === ErrorCodes.PROVIDER_RATE_LIMIT) {
       throw providerRateLimitErrorFromPayload(turnEnded.error);
     }
@@ -475,7 +524,10 @@ async function runChildTurnToCompletion(child: Agent, signal: AbortSignal): Prom
   }
 }
 
-function providerRateLimitErrorFromPayload(error: KimiErrorPayload): APIProviderRateLimitError {
+function providerRateLimitErrorFromPayload(error: {
+  readonly message: string;
+  readonly details?: Record<string, unknown>;
+}): APIProviderRateLimitError {
   const requestId =
     typeof error.details?.['requestId'] === 'string' ? error.details['requestId'] : null;
   return new APIProviderRateLimitError(error.message, requestId);

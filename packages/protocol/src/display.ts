@@ -50,7 +50,7 @@ export const ToolInputDisplaySchema = z.discriminatedUnion('kind', [
     items: z.array(z.object({ title: z.string(), status: z.string() })),
   }),
   z.object({
-    kind: z.literal('background_task'),
+    kind: z.literal('task'),
     task_id: z.string(),
     status: z.string(),
     description: z.string(),
@@ -74,6 +74,15 @@ export const ToolInputDisplaySchema = z.discriminatedUnion('kind', [
       )
       .readonly()
       .optional(),
+  }),
+  z.object({
+    kind: z.literal('goal_start'),
+    objective: z.string(),
+    completionCriterion: z.string().optional(),
+    // Current permission mode at approval time. The client uses it to pick the
+    // start menu (manual vs yolo); `auto` never reaches this display because it
+    // auto-approves the goal without a prompt.
+    mode: z.enum(['manual', 'yolo']),
   }),
   z.object({
     kind: z.literal('generic'),
@@ -122,7 +131,7 @@ export const ToolResultDisplaySchema = z.discriminatedUnion('kind', [
     steps: z.number().optional(),
   }),
   z.object({
-    kind: z.literal('background_task'),
+    kind: z.literal('task'),
     task_id: z.string(),
     status: z.string(),
     description: z.string(),

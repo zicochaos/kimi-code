@@ -5,12 +5,13 @@ import {
   isContextOverflowErrorCode,
 } from '#/errors';
 import type { ContentPart, Message, StreamedMessagePart, ToolCall } from '#/message';
-import { extractText } from '#/message';
+import { extractText, isToolDeclarationOnlyMessage } from '#/message';
 import type {
   ChatProvider,
   FinishReason,
   GenerateOptions,
   ProviderRequestAuth,
+  ResponseFormat,
   StreamedMessage,
   ThinkingEffort,
 } from '#/provider';
@@ -234,6 +235,13 @@ function formatResponsesErrorEvent(
   return `${codeText}: ${message}${paramText}`;
 }
 
+const EMBEDDED_STATUS_CODE_RE = /\bstatus_code\s*[:=]\s*(\d{3})\b/;
+
+function readEmbeddedStatusCode(message: string): number | undefined {
+  const match = EMBEDDED_STATUS_CODE_RE.exec(message);
+  return match === null ? undefined : Number(match[1]);
+}
+
 function errorFromOpenAIResponsesEvent(
   prefix: string,
   code: string | null,
@@ -245,7 +253,7 @@ function errorFromOpenAIResponsesEvent(
   if (isContextOverflowErrorCode(code)) {
     return new APIContextOverflowError(400, fullMessage);
   }
-  if (code === 'rate_limit_exceeded') {
+  if (code === 'rate_limit_exceeded' || readEmbeddedStatusCode(message) === 429) {
     return new APIProviderRateLimitError(fullMessage);
   }
   return new ChatProviderError(fullMessage);
@@ -362,6 +370,22 @@ interface ResponseToolParam {
   parameters: Record<string, unknown>;
   strict: boolean;
 }
+
+function responseFormatToResponsesText(format: ResponseFormat): Record<string, unknown> {
+  if (format.type === 'json_object') {
+    return { format: { type: 'json_object' } };
+  }
+  return {
+    format: {
+      type: 'json_schema',
+      name: format.jsonSchema.name,
+      schema: format.jsonSchema.schema,
+      strict: format.jsonSchema.strict,
+      description: format.jsonSchema.description,
+    },
+  };
+}
+
 // The Responses API has no input type for video, and only mp3/wav audio can
 // be inlined as input_file data. Degrade such parts to placeholder text so
 // the model still learns an attachment existed instead of silently losing it.
@@ -614,6 +638,10 @@ function convertHistoryMessages(
   };
 
   for (const msg of history) {
+    // Message-level tool declarations are a Kimi wire feature; skipped here
+    // because the leftover content-free message item is rejected by the
+    // Responses API. See isToolDeclarationOnlyMessage.
+    if (isToolDeclarationOnlyMessage(msg)) continue;
     if (msg.role !== 'tool') {
       flushPendingMedia();
     }
@@ -979,6 +1007,11 @@ export class OpenAIResponsesStreamedMessage implements StreamedMessage {
 export class OpenAIResponsesChatProvider implements ChatProvider {
   readonly name: string = 'openai-responses';
 
+  /** See {@link ChatProvider.maxCompletionTokens}. */
+  get maxCompletionTokens(): number | undefined {
+    return this._generationKwargs.max_output_tokens;
+  }
+
   private _model: string;
   private _stream: boolean;
   private _apiKey: string | undefined;
@@ -1074,6 +1107,12 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
       if (systemPrompt) {
         createParams['instructions'] = systemPrompt;
       }
+      if (options?.responseFormat !== undefined) {
+        createParams['text'] = {
+          ...asRawObject(createParams['text']),
+          ...responseFormatToResponsesText(options.responseFormat),
+        };
+      }
 
       if (
         !('responses' in client) ||
@@ -1084,6 +1123,7 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
         );
       }
 
+      options?.onRequestSent?.();
       const response = await (
         client.responses as {
           create(params: unknown, opts?: unknown): Promise<unknown>;

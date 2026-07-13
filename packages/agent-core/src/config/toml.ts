@@ -11,6 +11,7 @@ import {
   type BackgroundConfig,
   type ExperimentalConfig,
   type HookDefConfig,
+  type ImageConfig,
   type KimiConfig,
   type LoopControl,
   type ModelAlias,
@@ -19,6 +20,7 @@ import {
   type PermissionConfig,
   type ProviderConfig,
   type ServicesConfig,
+  type SubagentConfig,
   type ThinkingConfig,
   validateConfig,
 } from '#/config/schema';
@@ -312,8 +314,12 @@ export function transformTomlData(data: Record<string, unknown>): Record<string,
       result[targetKey] = transformLoopControlData(value);
     } else if (targetKey === 'background' && isPlainObject(value)) {
       result[targetKey] = transformPlainObject(value);
+    } else if (targetKey === 'image' && isPlainObject(value)) {
+      result[targetKey] = transformPlainObject(value);
     } else if (targetKey === 'experimental' && isPlainObject(value)) {
       result[targetKey] = cloneRecord(value);
+    } else if (targetKey === 'subagent' && isPlainObject(value)) {
+      result[targetKey] = transformPlainObject(value);
     } else if (!isPlainObject(value)) {
       result[targetKey] = value;
     }
@@ -366,6 +372,9 @@ function transformModelData(data: Record<string, unknown>): Record<string, unkno
     } else if ('maxTokens' in out && typeof out['maxTokens'] === 'number') {
       out['maxOutputSize'] = out['maxTokens'];
     }
+  }
+  if (isPlainObject(out['overrides'])) {
+    out['overrides'] = transformPlainObject(out['overrides']);
   }
   return out;
 }
@@ -468,6 +477,8 @@ export function configToTomlData(config: KimiConfig): Record<string, unknown> {
   delete out['default_yolo'];
   delete out['defaultYolo'];
   delete out['defaultPermissionMode'];
+  delete out['default_thinking'];
+  delete out['defaultThinking'];
 
   // Top-level scalar fields
   const scalarFields: (keyof KimiConfig)[] = [
@@ -475,7 +486,6 @@ export function configToTomlData(config: KimiConfig): Record<string, unknown> {
     'defaultModel',
     'planMode',
     'yolo',
-    'defaultThinking',
     'defaultPermissionMode',
     'defaultPlanMode',
     'mergeAllAvailableSkills',
@@ -492,6 +502,8 @@ export function configToTomlData(config: KimiConfig): Record<string, unknown> {
   setSection(out, 'services', config.services, servicesToToml);
   setSection(out, 'loop_control', config.loopControl, loopControlToToml);
   setSection(out, 'background', config.background, backgroundToToml);
+  setSection(out, 'subagent', config.subagent, subagentToToml);
+  setSection(out, 'image', config.image, imageToToml);
   setSection(out, 'experimental', config.experimental, experimentalToToml);
   setSection(out, 'permission', config.permission, permissionToToml);
   setHooks(out, config.hooks);
@@ -561,6 +573,24 @@ function modelToToml(model: ModelAlias, rawModel: unknown): Record<string, unkno
   for (const [key, value] of Object.entries(model)) {
     if (key === 'capabilities' && Array.isArray(value)) {
       out[camelToSnake(key)] = [...value];
+    } else if (key === 'overrides' && isPlainObject(value)) {
+      const rawOverrides = isPlainObject(rawModel) ? rawModel['overrides'] : undefined;
+      out['overrides'] = modelOverridesToToml(value, rawOverrides);
+    } else {
+      setDefined(out, camelToSnake(key), value);
+    }
+  }
+  return out;
+}
+
+function modelOverridesToToml(
+  overrides: Record<string, unknown>,
+  rawOverrides: unknown,
+): Record<string, unknown> {
+  const out = cloneRecord(rawOverrides);
+  for (const [key, value] of Object.entries(overrides)) {
+    if (key === 'capabilities' && Array.isArray(value)) {
+      out[camelToSnake(key)] = [...value];
     } else {
       setDefined(out, camelToSnake(key), value);
     }
@@ -570,6 +600,7 @@ function modelToToml(model: ModelAlias, rawModel: unknown): Record<string, unkno
 
 function thinkingToToml(thinking: ThinkingConfig, rawThinking: unknown): Record<string, unknown> {
   const out = cloneRecord(rawThinking);
+  delete out['mode'];
   for (const [key, value] of Object.entries(thinking)) {
     setDefined(out, camelToSnake(key), value);
   }
@@ -649,6 +680,22 @@ function backgroundToToml(
 ): Record<string, unknown> {
   const out = cloneRecord(rawBackground);
   for (const [key, value] of Object.entries(background)) {
+    setDefined(out, camelToSnake(key), value);
+  }
+  return out;
+}
+
+function subagentToToml(subagent: SubagentConfig, rawSubagent: unknown): Record<string, unknown> {
+  const out = cloneRecord(rawSubagent);
+  for (const [key, value] of Object.entries(subagent)) {
+    setDefined(out, camelToSnake(key), value);
+  }
+  return out;
+}
+
+function imageToToml(image: ImageConfig, rawImage: unknown): Record<string, unknown> {
+  const out = cloneRecord(rawImage);
+  for (const [key, value] of Object.entries(image)) {
     setDefined(out, camelToSnake(key), value);
   }
   return out;

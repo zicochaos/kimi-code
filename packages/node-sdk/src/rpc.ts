@@ -9,6 +9,7 @@ import {
   type CoreAPI,
   type Event,
   type ExperimentalFeatureState,
+  type GetCronTasksResult,
   type QuestionRequest,
   type QuestionResult,
   type RPCMethods,
@@ -21,6 +22,8 @@ import type { Kaos } from '@moonshot-ai/kaos';
 
 import type { ApprovalHandler, QuestionHandler } from '#/events';
 import type {
+  AddAdditionalDirInput,
+  AddAdditionalDirResult,
   BackgroundTaskInfo,
   ConfigDiagnostics,
   CreateSessionOptions,
@@ -50,6 +53,7 @@ import type {
   ResumedSessionSummary,
   SessionSummary,
   SkillSummary,
+  PluginCommandDef,
   Unsubscribe,
 } from '#/types';
 
@@ -64,6 +68,10 @@ export interface SessionIdRpcInput {
   readonly sessionId: string;
 }
 
+export interface ReloadSessionRpcInput extends SessionIdRpcInput {
+  readonly forcePluginSessionStartReminder?: boolean;
+}
+
 export interface SetSessionModelRpcInput extends SessionIdRpcInput {
   readonly model: string;
 }
@@ -74,7 +82,7 @@ export interface SetSessionModelRpcResult {
 }
 
 export interface SetSessionThinkingRpcInput extends SessionIdRpcInput {
-  readonly level: string;
+  readonly effort: string;
 }
 
 export interface SetSessionPermissionRpcInput extends SessionIdRpcInput {
@@ -91,6 +99,12 @@ export type SetSessionSwarmModeRpcInput =
 
 export interface ActivateSkillRpcInput extends SessionIdRpcInput {
   readonly name: string;
+  readonly args?: string | undefined;
+}
+
+export interface ActivatePluginCommandRpcInput extends SessionIdRpcInput {
+  readonly pluginId: string;
+  readonly commandName: string;
   readonly args?: string | undefined;
 }
 
@@ -148,9 +162,12 @@ export abstract class SDKRpcClientBase {
     return this.resumeSession(input);
   }
 
-  async reloadSession(input: SessionIdRpcInput): Promise<ResumedSessionSummary> {
+  async reloadSession(input: ReloadSessionRpcInput): Promise<ResumedSessionSummary> {
     const rpc = await this.getRpc();
-    return rpc.reloadSession({ sessionId: input.sessionId });
+    return rpc.reloadSession({
+      sessionId: input.sessionId,
+      forcePluginSessionStartReminder: input.forcePluginSessionStartReminder,
+    });
   }
 
   async forkSession(input: ForkSessionInput): Promise<SessionSummary> {
@@ -228,6 +245,31 @@ export abstract class SDKRpcClientBase {
     });
   }
 
+  async runShellCommand(input: {
+    sessionId: string;
+    command: string;
+    commandId?: string;
+  }): Promise<{ stdout: string; stderr: string; isError?: boolean; backgrounded?: boolean }> {
+    const agentId = this.interactiveAgentId;
+    const rpc = await this.getRpc();
+    return rpc.runShellCommand({
+      sessionId: input.sessionId,
+      agentId,
+      command: input.command,
+      commandId: input.commandId,
+    });
+  }
+
+  async cancelShellCommand(input: { sessionId: string; commandId: string }): Promise<void> {
+    const agentId = this.interactiveAgentId;
+    const rpc = await this.getRpc();
+    return rpc.cancelShellCommand({
+      sessionId: input.sessionId,
+      agentId,
+      commandId: input.commandId,
+    });
+  }
+
   async steer(input: SessionPromptRpcInput): Promise<void> {
     const agentId = this.interactiveAgentId;
     const rpc = await this.getRpc();
@@ -241,6 +283,16 @@ export abstract class SDKRpcClientBase {
   async generateAgentsMd(input: SessionIdRpcInput): Promise<void> {
     const rpc = await this.getRpc();
     return rpc.generateAgentsMd({ sessionId: input.sessionId });
+  }
+
+  async getSessionWarnings(input: SessionIdRpcInput) {
+    const rpc = await this.getRpc();
+    return rpc.getSessionWarnings({ sessionId: input.sessionId });
+  }
+
+  async addAdditionalDir(input: AddAdditionalDirInput): Promise<AddAdditionalDirResult> {
+    const rpc = await this.getRpc();
+    return rpc.addAdditionalDir({ sessionId: input.id, path: input.path, persist: input.persist });
   }
 
   async startBtw(input: SessionIdRpcInput): Promise<string> {
@@ -275,7 +327,7 @@ export abstract class SDKRpcClientBase {
     return rpc.setThinking({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
-      level: input.level,
+      effort: input.effort,
     });
   }
 
@@ -423,7 +475,7 @@ export abstract class SDKRpcClientBase {
       usage.byModel !== undefined || usage.total !== undefined || usage.currentTurn !== undefined;
     return {
       model: config.modelAlias ?? config.provider?.model,
-      thinkingLevel: config.thinkingLevel,
+      thinkingEffort: config.thinkingEffort,
       permission: permission.mode,
       planMode: plan !== null,
       swarmMode,
@@ -437,6 +489,11 @@ export abstract class SDKRpcClientBase {
   async listSkills(input: SessionIdRpcInput): Promise<readonly SkillSummary[]> {
     const rpc = await this.getRpc();
     return rpc.listSkills({ sessionId: input.sessionId });
+  }
+
+  async listPluginCommands(input: SessionIdRpcInput): Promise<readonly PluginCommandDef[]> {
+    const rpc = await this.getRpc();
+    return rpc.listPluginCommands({ sessionId: input.sessionId });
   }
 
   async listBackgroundTasks(
@@ -473,6 +530,27 @@ export abstract class SDKRpcClientBase {
       taskId: input.taskId,
       reason: input.reason,
     });
+  }
+
+  async detachBackgroundTask(
+    input: SessionIdRpcInput & { taskId: string },
+  ): Promise<BackgroundTaskInfo | undefined> {
+    const rpc = await this.getRpc();
+    return rpc.detachBackground({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      taskId: input.taskId,
+    });
+  }
+
+  async waitForBackgroundTasksOnPrint(input: SessionIdRpcInput): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.waitForBackgroundTasksOnPrint({ sessionId: input.sessionId });
+  }
+
+  async handlePrintMainTurnCompleted(input: SessionIdRpcInput): Promise<'finish' | 'continue'> {
+    const rpc = await this.getRpc();
+    return rpc.handlePrintMainTurnCompleted({ sessionId: input.sessionId });
   }
 
   async createGoal(input: SessionIdRpcInput & CreateGoalInput): Promise<GoalSnapshot> {
@@ -512,6 +590,11 @@ export abstract class SDKRpcClientBase {
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
     });
+  }
+
+  async getCronTasks(input: SessionIdRpcInput): Promise<GetCronTasksResult> {
+    const rpc = await this.getRpc();
+    return rpc.getCronTasks({ sessionId: input.sessionId, agentId: this.interactiveAgentId });
   }
 
   async listMcpServers(input: SessionIdRpcInput): Promise<readonly McpServerInfo[]> {
@@ -574,6 +657,17 @@ export abstract class SDKRpcClientBase {
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
       name: input.name,
+      args: input.args,
+    });
+  }
+
+  async activatePluginCommand(input: ActivatePluginCommandRpcInput): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.activatePluginCommand({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      pluginId: input.pluginId,
+      commandName: input.commandName,
       args: input.args,
     });
   }
