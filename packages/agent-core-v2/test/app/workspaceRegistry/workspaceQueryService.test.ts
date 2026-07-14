@@ -55,6 +55,8 @@ class FakeSessionIndex implements ISessionIndex {
 class FakeWorkspaceRegistry implements IWorkspaceRegistry {
   readonly _serviceBrand: undefined;
   workspaces: readonly Workspace[] = [];
+  readonly resolvedWorkspaces = new Map<string, Workspace>();
+  readonly getCalls: string[] = [];
   readonly deletedIds = new Set<string>();
   readonly deletedRoots = new Map<string, string>();
 
@@ -71,7 +73,8 @@ class FakeWorkspaceRegistry implements IWorkspaceRegistry {
   }
 
   async get(id: string): Promise<Workspace | undefined> {
-    return this.workspaces.find((workspace) => workspace.id === id);
+    this.getCalls.push(id);
+    return this.resolvedWorkspaces.get(id) ?? this.workspaces.find((workspace) => workspace.id === id);
   }
 
   async createOrTouch(_root: string, _name?: string): Promise<Workspace> {
@@ -248,6 +251,31 @@ describe('WorkspaceQueryService', () => {
       }),
     ]);
     await expect(query.listSessions(encodeWorkDirKey(root))).resolves.toHaveLength(1);
+  });
+
+  it('resolves a physical legacy alias without cwd through the registry fallback', async () => {
+    const { query, index, registry } = build();
+    const root = '/work/legacy-physical';
+    const canonicalId = encodeWorkDirKey(root);
+    const alias = 'wd_legacy_physical_deadbeef0000';
+    registry.workspaces = [
+      { id: canonicalId, root, name: 'Legacy physical', createdAt: 1, lastOpenedAt: 2 },
+    ];
+    registry.resolvedWorkspaces.set(alias, {
+      id: alias,
+      root,
+      name: 'Legacy physical',
+      createdAt: 1,
+      lastOpenedAt: 2,
+    });
+    index.items = [summary('legacy-1', alias, 100), summary('legacy-2', alias, 200)];
+
+    await expect(query.list()).resolves.toEqual([
+      expect.objectContaining({ id: canonicalId, root, sessionCount: 2 }),
+    ]);
+    expect(registry.getCalls).toEqual([alias]);
+    await expect(query.listSessions(canonicalId)).resolves.toHaveLength(2);
+    await expect(query.get(alias)).resolves.toMatchObject({ id: alias, root });
   });
 
   it('resolves an alias to its root before returning recent sessions', async () => {

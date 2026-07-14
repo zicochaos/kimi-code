@@ -392,4 +392,39 @@ describe('WorkspaceRegistryService', () => {
     expect((await ctx.registry.createOrTouch(root)).session_count).toBe(2);
     expect((await ctx.registry.update(canonicalId, { name: 'renamed' })).session_count).toBe(2);
   });
+
+  it('does not recover a derived workspace with an id tombstone during update', async () => {
+    const root = await makeProjectRoot('update-id-tombstone');
+    await seedSessionBucket(root, 'sess-update-id-tombstone');
+    const id = encodeWorkDirKey(root);
+    await writeFile(
+      join(ctx.homeDir, 'workspaces.json'),
+      JSON.stringify({ version: 1, workspaces: {}, deleted_workspace_ids: [id] }),
+      'utf8',
+    );
+
+    await expect(ctx.registry.update(id, { name: 'should-not-recover' })).rejects.toThrow(
+      'workspace not found',
+    );
+  });
+
+  it('does not recover a derived workspace with a root tombstone during update', async () => {
+    const root = await makeProjectRoot('update-root-tombstone');
+    await seedSessionBucket(root, 'sess-update-root-tombstone');
+    const id = encodeWorkDirKey(root);
+    await writeFile(
+      join(ctx.homeDir, 'workspaces.json'),
+      JSON.stringify({
+        version: 1,
+        workspaces: {},
+        deleted_workspace_ids: ['old-workspace-id'],
+        deleted_workspace_roots: { 'old-workspace-id': root },
+      }),
+      'utf8',
+    );
+
+    await expect(ctx.registry.update(id, { name: 'should-not-recover' })).rejects.toThrow(
+      'workspace not found',
+    );
+  });
 });

@@ -208,6 +208,29 @@ describe('WorkspaceRegistryService (file-backed)', () => {
     });
   });
 
+  it('uses the latest session index bucket for a repeated session id', async () => {
+    const oldRoot = join(homeDir, 'repaired-old');
+    const newRoot = join(homeDir, 'repaired-new');
+    const oldBucket = 'wd_repaired_old_deadbeef0000';
+    const newBucket = 'wd_repaired_new_deadbeef0000';
+    await seedSessionIndex([
+      {
+        sessionId: 'repaired-session',
+        sessionDir: join(homeDir, 'sessions', oldBucket, 'repaired-session'),
+        workDir: oldRoot,
+      },
+      {
+        sessionId: 'repaired-session',
+        sessionDir: join(homeDir, 'sessions', newBucket, 'repaired-session'),
+        workDir: newRoot,
+      },
+    ]);
+
+    await expect(build().list()).resolves.toEqual([
+      expect.objectContaining({ id: newBucket, root: newRoot }),
+    ]);
+  });
+
   it('prefers an existing workspaces.json over the session index', async () => {
     const work = join(homeDir, 'existing');
     await writeWorkspacesJson({
@@ -350,6 +373,49 @@ describe('WorkspaceRegistryService (file-backed)', () => {
 
     await expect(registry.get(alias)).resolves.toMatchObject({ id: alias, root });
     await expect(registry.get(canonicalId)).resolves.toMatchObject({ id: canonicalId, root });
+  });
+
+  it('does not recover a session-index workspace with an id tombstone during update', async () => {
+    const root = join(homeDir, 'id-tombstone-update');
+    const id = 'wd_id_tombstone_deadbeef0000';
+    await seedSessionIndex([
+      {
+        sessionId: 'tombstoned-session',
+        sessionDir: join(homeDir, 'sessions', id, 'tombstoned-session'),
+        workDir: root,
+      },
+    ]);
+    await fsp.writeFile(
+      join(homeDir, 'workspaces.json'),
+      JSON.stringify({ version: 1, workspaces: {}, deleted_workspace_ids: [id] }),
+      'utf8',
+    );
+
+    await expect(build().update(id, { name: 'should-not-recover' })).resolves.toBeUndefined();
+  });
+
+  it('does not recover a session-index workspace with a root tombstone during update', async () => {
+    const root = join(homeDir, 'root-tombstone-update');
+    const id = 'wd_root_tombstone_deadbeef0000';
+    await seedSessionIndex([
+      {
+        sessionId: 'root-tombstoned-session',
+        sessionDir: join(homeDir, 'sessions', id, 'root-tombstoned-session'),
+        workDir: root,
+      },
+    ]);
+    await fsp.writeFile(
+      join(homeDir, 'workspaces.json'),
+      JSON.stringify({
+        version: 1,
+        workspaces: {},
+        deleted_workspace_ids: ['old-workspace-id'],
+        deleted_workspace_roots: { 'old-workspace-id': root },
+      }),
+      'utf8',
+    );
+
+    await expect(build().update(id, { name: 'should-not-recover' })).resolves.toBeUndefined();
   });
 
   it('rebuilds an alias-only workspace from the physical session bucket id', async () => {

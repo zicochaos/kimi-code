@@ -39,6 +39,7 @@ export class WorkspaceQueryService implements IWorkspaceQueryService {
       this.registry.snapshot(),
       this.index.list({}),
     ]);
+    const resolveRoot = createSessionRootResolver(snapshot, this.registry);
     const deletedRoots = normalizedDeletedRoots(snapshot);
     const byRoot = new Map<
       string,
@@ -62,7 +63,7 @@ export class WorkspaceQueryService implements IWorkspaceQueryService {
     }
 
     for (const session of page.items) {
-      const root = sessionRoot(session, snapshot);
+      const root = await resolveRoot(session);
       if (root === undefined || isDeleted(snapshot, session.workspaceId, root, deletedRoots)) {
         continue;
       }
@@ -116,8 +117,9 @@ export class WorkspaceQueryService implements IWorkspaceQueryService {
     if (registered !== undefined) return registered;
 
     const page = await this.index.list({ includeArchived: true });
-    const sessions = sessionsForWorkspace(page.items, snapshot, workspaceId);
-    return deriveWorkspace(sessions, snapshot);
+    const resolveRoot = createSessionRootResolver(snapshot, this.registry);
+    const sessions = await sessionsForWorkspace(page.items, snapshot, workspaceId, resolveRoot);
+    return deriveWorkspace(sessions, resolveRoot);
   }
 
   async listSessions(
@@ -126,7 +128,8 @@ export class WorkspaceQueryService implements IWorkspaceQueryService {
   ): Promise<readonly SessionSummary[]> {
     const snapshot = await this.registry.snapshot();
     const page = await this.index.list({ includeArchived: options?.includeArchived });
-    return sessionsForWorkspace(page.items, snapshot, workspaceId).toSorted(
+    const resolveRoot = createSessionRootResolver(snapshot, this.registry);
+    return (await sessionsForWorkspace(page.items, snapshot, workspaceId, resolveRoot)).toSorted(
       (left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id),
     );
   }
@@ -172,60 +175,79 @@ function findRepresentativeWorkspace(
   return candidates.find((workspace) => workspace.id === canonicalId) ?? candidates[0];
 }
 
-function sessionsForWorkspace(
+async function sessionsForWorkspace(
   sessions: readonly SessionSummary[],
   snapshot: WorkspaceRegistrySnapshot,
   workspaceId: string,
-): SessionSummary[] {
+  resolveRoot: SessionRootResolver,
+): Promise<SessionSummary[]> {
   const registered = resolveRegisteredWorkspace(snapshot, workspaceId);
-  const requestedRoot = registered?.root ?? rootForWorkspaceId(sessions, snapshot, workspaceId);
+  const requestedRoot =
+    registered?.root ?? (await rootForWorkspaceId(sessions, workspaceId, resolveRoot));
   const deletedRoots = normalizedDeletedRoots(snapshot);
   if (snapshot.deletedWorkspaceIds.has(workspaceId)) return [];
-  return sessions.filter((session) => {
-    const root = sessionRoot(session, snapshot);
+  const matching: SessionSummary[] = [];
+  for (const session of sessions) {
+    const root = await resolveRoot(session);
     if (root === undefined || isDeleted(snapshot, session.workspaceId, root, deletedRoots)) {
-      return false;
+      continue;
     }
-    if (requestedRoot !== undefined) return root === requestedRoot;
-    return session.workspaceId === workspaceId || encodeWorkDirKey(root) === workspaceId;
-  });
-}
-
-function rootForWorkspaceId(
-  sessions: readonly SessionSummary[],
-  snapshot: WorkspaceRegistrySnapshot,
-  workspaceId: string,
-): string | undefined {
-  const matching = sessions.find((session) => session.workspaceId === workspaceId);
-  return matching === undefined ? undefined : sessionRoot(matching, snapshot);
-}
-
-function sessionRoot(
-  session: SessionSummary,
-  snapshot: WorkspaceRegistrySnapshot,
-): string | undefined {
-  if (session.cwd !== undefined && session.cwd.trim() !== '') {
-    return normalizeWorkDir(session.cwd);
+    if (requestedRoot !== undefined) {
+      if (root === requestedRoot) matching.push(session);
+      continue;
+    }
+    if (session.workspaceId === workspaceId || encodeWorkDirKey(root) === workspaceId) {
+      matching.push(session);
+    }
   }
-  const registered = snapshot.workspaces.find(
-    (workspace) => workspace.id === session.workspaceId,
-  ) ??
-    snapshot.workspaces.find(
-      (workspace) => encodeWorkDirKey(normalizeWorkDir(workspace.root)) === session.workspaceId,
-    );
-  return registered === undefined ? undefined : normalizeWorkDir(registered.root);
+  return matching;
 }
 
-function deriveWorkspace(
+async function rootForWorkspaceId(
   sessions: readonly SessionSummary[],
+  workspaceId: string,
+  resolveRoot: SessionRootResolver,
+): Promise<string | undefined> {
+  const matching = sessions.find((session) => session.workspaceId === workspaceId);
+  return matching === undefined ? undefined : resolveRoot(matching);
+}
+
+type SessionRootResolver = (session: SessionSummary) => Promise<string | undefined>;
+
+function createSessionRootResolver(
   snapshot: WorkspaceRegistrySnapshot,
-): Workspace | undefined {
+  registry: IWorkspaceRegistry,
+): SessionRootResolver {
+  const fallbackRoots = new Map<string, string | undefined>();
+  return async (session) => {
+    if (session.cwd !== undefined && session.cwd.trim() !== '') {
+      return normalizeWorkDir(session.cwd);
+    }
+    if (fallbackRoots.has(session.workspaceId)) {
+      return fallbackRoots.get(session.workspaceId);
+    }
+    const registered = resolveRegisteredWorkspace(snapshot, session.workspaceId);
+    if (registered !== undefined) {
+      fallbackRoots.set(session.workspaceId, registered.root);
+      return registered.root;
+    }
+    const resolved = await registry.get(session.workspaceId);
+    const root = resolved === undefined ? undefined : normalizeWorkDir(resolved.root);
+    fallbackRoots.set(session.workspaceId, root);
+    return root;
+  };
+}
+
+async function deriveWorkspace(
+  sessions: readonly SessionSummary[],
+  resolveRoot: SessionRootResolver,
+): Promise<Workspace | undefined> {
   if (sessions.length === 0) return undefined;
-  const root = sessions
-    .map((session) => sessionRoot(session, snapshot))
+  const roots = await Promise.all(sessions.map((session) => resolveRoot(session)));
+  const root = roots
     .find((candidate): candidate is string => candidate !== undefined);
   if (root === undefined) return undefined;
-  const representativeId = representativeSessionWorkspaceId(sessions, snapshot, root);
+  const representativeId = representativeSessionWorkspaceId(sessions, roots, root);
   return {
     id: representativeId,
     root,
@@ -237,19 +259,16 @@ function deriveWorkspace(
 
 function representativeSessionWorkspaceId(
   sessions: readonly SessionSummary[],
-  snapshot: WorkspaceRegistrySnapshot,
+  roots: readonly (string | undefined)[],
   root: string,
 ): string {
   const canonicalId = encodeWorkDirKey(root);
   if (
-    sessions.some(
-      (session) =>
-        session.workspaceId === canonicalId && sessionRoot(session, snapshot) === root,
-    )
+    sessions.some((session, index) => session.workspaceId === canonicalId && roots[index] === root)
   ) {
     return canonicalId;
   }
-  return sessions.find((session) => sessionRoot(session, snapshot) === root)?.workspaceId ?? canonicalId;
+  return sessions.find((session, index) => roots[index] === root)?.workspaceId ?? canonicalId;
 }
 
 function normalizedDeletedRoots(snapshot: WorkspaceRegistrySnapshot): ReadonlySet<string> {

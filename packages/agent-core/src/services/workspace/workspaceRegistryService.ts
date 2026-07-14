@@ -272,6 +272,9 @@ export class WorkspaceRegistryService extends Disposable implements IWorkspaceRe
             : { id: fallback[0], entry: fallback[1] }
           : { id: workspaceId, entry: exact };
       if (existing === undefined) {
+        if (file.deleted_workspace_ids.includes(workspaceId)) {
+          throw new WorkspaceNotFoundError(workspaceId);
+        }
         const derived = await this.findDerivedWorkspace(workspaceId);
         if (
           derived === undefined ||
@@ -280,6 +283,9 @@ export class WorkspaceRegistryService extends Disposable implements IWorkspaceRe
           throw new WorkspaceNotFoundError(workspaceId);
         }
         const representativeId = representativeIndexedWorkspaceId(derived, workspaceId);
+        if (file.deleted_workspace_ids.includes(representativeId)) {
+          throw new WorkspaceNotFoundError(workspaceId);
+        }
         existing = {
           id: representativeId,
           entry: {

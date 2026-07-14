@@ -176,6 +176,16 @@ export class WorkspaceRegistryService implements IWorkspaceRegistry {
             (workspace) => encodeWorkDirKey(normalizeWorkDir(workspace.root)) === id,
           );
         if (recovered !== undefined) {
+          const recoveredRoot = normalizeWorkDir(recovered.root);
+          const canonicalRecoveredId = encodeWorkDirKey(recoveredRoot);
+          if (
+            catalog.deletedWorkspaceIds.has(id) ||
+            catalog.deletedWorkspaceIds.has(recovered.id) ||
+            catalog.deletedWorkspaceIds.has(canonicalRecoveredId) ||
+            normalizedDeletedRoots(catalog).has(recoveredRoot)
+          ) {
+            return { next: catalog, value: undefined };
+          }
           next.workspaces.set(recovered.id, recovered);
           existing = recovered;
         }
@@ -256,10 +266,14 @@ export class WorkspaceRegistryService implements IWorkspaceRegistry {
     if (bytes === undefined) {
       return { workspaces: result, deletedWorkspaceIds: new Set(), deletedWorkspaceRoots: new Map() };
     }
-    const now = Date.now();
+    const latestBySession = new Map<string, SessionIndexLine>();
     for (const line of new TextDecoder().decode(bytes).split(/\r?\n/)) {
       const entry = parseSessionIndexLine(line.trim());
-      if (entry === undefined || !isAbsolute(entry.workDir)) continue;
+      if (entry !== undefined) latestBySession.set(entry.sessionId, entry);
+    }
+    const now = Date.now();
+    for (const entry of latestBySession.values()) {
+      if (!isAbsolute(entry.workDir)) continue;
       const root = normalizeWorkDir(entry.workDir);
       const id = sessionBucketId(entry.sessionDir, entry.sessionId, this.bootstrap.sessionsDir);
       if (id === undefined || result.has(id)) continue;
@@ -396,11 +410,15 @@ function dedupeByRoot(workspaces: readonly Workspace[]): Workspace[] {
   return [...byRoot.values()].map(({ workspace }) => workspace);
 }
 
-function normalizedDeletedRoots(snapshot: WorkspaceRegistrySnapshot): ReadonlySet<string> {
+function normalizedDeletedRoots(
+  snapshot: WorkspaceRegistrySnapshot | WorkspaceCatalogState,
+): ReadonlySet<string> {
   const roots = new Set(
     [...snapshot.deletedWorkspaceRoots.values()].map((root) => normalizeWorkDir(root)),
   );
-  for (const workspace of snapshot.workspaces) {
+  const workspaces =
+    snapshot.workspaces instanceof Map ? snapshot.workspaces.values() : snapshot.workspaces;
+  for (const workspace of workspaces) {
     if (snapshot.deletedWorkspaceIds.has(workspace.id)) {
       roots.add(normalizeWorkDir(workspace.root));
     }
