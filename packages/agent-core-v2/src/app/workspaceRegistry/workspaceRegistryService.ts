@@ -10,12 +10,13 @@
  * `workspaceQuery`. Bound at App scope.
  */
 
-import { basename, dirname, isAbsolute } from 'pathe';
+import { basename, isAbsolute, relative, resolve } from 'pathe';
 
 import { InstantiationType } from '#/_base/di/extensions';
 import { LifecycleScope, registerScopedService } from '#/_base/di/scope';
 import { encodeWorkDirKey, normalizeWorkDir } from '#/_base/utils/workdir-slug';
 import { ErrorCodes, Error2, unwrapErrorCause } from '#/errors';
+import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { IHostFileSystem } from '#/os/interface/hostFileSystem';
 import { IFileSystemStorageService } from '#/persistence/interface/storage';
 
@@ -48,6 +49,7 @@ export class WorkspaceRegistryService implements IWorkspaceRegistry {
     @IWorkspacePersistence private readonly store: IWorkspacePersistence,
     @IFileSystemStorageService private readonly storage: IFileSystemStorageService,
     @IHostFileSystem private readonly hostFs: IHostFileSystem,
+    @IBootstrapService private readonly bootstrap: IBootstrapService,
   ) {}
 
   async list(): Promise<readonly Workspace[]> {
@@ -218,8 +220,8 @@ export class WorkspaceRegistryService implements IWorkspaceRegistry {
       const entry = parseSessionIndexLine(line.trim());
       if (entry === undefined || !isAbsolute(entry.workDir)) continue;
       const root = normalizeWorkDir(entry.workDir);
-      const id = basename(dirname(entry.sessionDir));
-      if (id === '' || result.has(id)) continue;
+      const id = sessionBucketId(entry.sessionDir, entry.sessionId, this.bootstrap.sessionsDir);
+      if (id === undefined || result.has(id)) continue;
       result.set(id, {
         id,
         root,
@@ -243,6 +245,28 @@ export class WorkspaceRegistryService implements IWorkspaceRegistry {
     );
     return next;
   }
+}
+
+function sessionBucketId(
+  sessionDir: string,
+  sessionId: string,
+  sessionsDir: string,
+): string | undefined {
+  if (!isAbsolute(sessionDir) || !isAbsolute(sessionsDir)) return undefined;
+  const relativePath = relative(resolve(sessionsDir), resolve(sessionDir));
+  const segments = relativePath.split('/');
+  if (
+    segments.length !== 2 ||
+    segments[1] !== sessionId ||
+    segments[0] === '' ||
+    segments[0] === '.' ||
+    segments[0] === '..' ||
+    relativePath.startsWith('../') ||
+    isAbsolute(relativePath)
+  ) {
+    return undefined;
+  }
+  return segments[0];
 }
 
 function cloneCatalog(catalog: WorkspaceCatalogState): WorkspaceCatalogState {

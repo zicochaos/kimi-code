@@ -64,7 +64,10 @@ describe('WorkspaceRegistryService (file-backed)', () => {
   function build(): IWorkspaceRegistry {
     const fileStorage = new FileStorageService(homeDir);
     const host = createScopedTestHost([
-      stubPair(IBootstrapService, { homeDir } as IBootstrapService),
+      stubPair(
+        IBootstrapService,
+        { homeDir, sessionsDir: join(homeDir, 'sessions') } as IBootstrapService,
+      ),
       stubPair(IFileSystemStorageService, fileStorage),
       stubPair(IAtomicDocumentStore, new JsonAtomicDocumentStore(fileStorage)),
       stubPair(IHostFileSystem, new HostFileSystem()),
@@ -323,6 +326,29 @@ describe('WorkspaceRegistryService (file-backed)', () => {
       expect.objectContaining({ id: alias, root }),
     ]);
     await expect(registry.get(alias)).resolves.toMatchObject({ id: alias, root });
+  });
+
+  it('ignores session index entries outside the sessions tree', async () => {
+    const root = join(homeDir, 'valid-root');
+    await seedSessionIndex([
+      {
+        sessionId: 'relative',
+        sessionDir: 'sessions/wd_relative_000000000000/relative',
+        workDir: root,
+      },
+      {
+        sessionId: 'outside',
+        sessionDir: join(homeDir, 'outside', 'wd_outside_000000000000', 'outside'),
+        workDir: root,
+      },
+      {
+        sessionId: 'escape',
+        sessionDir: join(homeDir, 'sessions', '..', 'escape', 'escape'),
+        workDir: root,
+      },
+    ]);
+
+    await expect(build().list()).resolves.toEqual([]);
   });
 
   it('creates the home directory before acquiring the first workspace lock', async () => {
