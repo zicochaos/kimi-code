@@ -14,7 +14,7 @@ import {
   mkdirSync,
   open as openFd,
 } from 'node:fs';
-import { lstat, mkdir, open, readFile, readdir, unlink } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises';
 import { FSWatcher } from 'chokidar';
 import { dirname, join, normalize } from 'pathe';
 
@@ -132,7 +132,12 @@ export class FileStorageService implements IFileSystemStorageService {
       await mkdir(dirname(filePath), { recursive: true, mode: this.dirMode });
       await this.removeDurableEntry(filePath);
       await atomicWrite(filePath, data, undefined, this.fileMode);
+      const identity = fileIdentity(await stat(filePath, { bigint: true }));
       await syncDir(dirname(filePath));
+      if (identity !== undefined) {
+        const entry = await this.openDurableEntry(filePath, identity);
+        if (entry !== undefined) await this.installDurableEntry(filePath, entry);
+      }
     } catch (error) {
       throw toStorageIoError(error, { path: filePath, op: 'write' });
     }
