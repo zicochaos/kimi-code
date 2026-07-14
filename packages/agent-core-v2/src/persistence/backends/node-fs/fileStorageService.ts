@@ -1,28 +1,12 @@
 /**
- * `FileStorageService` — `IFileSystemStorageService` backed by the local filesystem.
+ * `storage` domain (L1) — local-filesystem byte storage.
  *
- * Layout: a value addressed by `(scope, key)` lives at
- * `<baseDir>/<scope>/<key>`. `scope` may contain slashes to form nested
- * directories (e.g. `"agents/main"`).
- *
- * Primitives:
- *   - `write`  → `atomicWrite` (tmp + fsync + rename) followed by a directory
- *                fsync, so the replacement is both atomic and durable.
- *   - `append` → `open('a')` + write + `fh.sync()` (when `durable`), plus a
- *                one-time directory fsync per scope.
- *   - `watch`  → chokidar on the parent directory, filtered to the exact key and
- *                debounced, so it survives atomic-replace renames and observes a
- *                file that does not exist yet at subscription time.
- *
- * It uses raw `node:fs` rather than `kaos`: the storage kernel needs direct
- * control over append offsets, fsync, atomic rename and streaming, which the
- * agent-execution-environment abstraction does not expose. Higher-level code
- * (`wireRecord`, `blobStore`) goes through the Store / Storage interfaces above
- * this backend, never `node:fs` directly.
+ * Provides durable atomic replacement, ordered append, reads, listing,
+ * deletion, and watching through the local filesystem. Bound at App scope.
  */
 
-import { createReadStream, mkdirSync } from 'node:fs';
-import { mkdir, open, readFile, readdir, unlink } from 'node:fs/promises';
+import { constants, createReadStream, mkdirSync } from 'node:fs';
+import { mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises';
 import { FSWatcher } from 'chokidar';
 import { dirname, join, normalize } from 'pathe';
 
@@ -39,18 +23,46 @@ import type {
 } from '#/persistence/interface/storage';
 import { toStorageIoError } from '#/persistence/interface/storage';
 
-// `fs.watch` often emits a burst per save (plus the temp file of an atomic
-// replace); collapse it into one reload signal.
 const WATCH_DEBOUNCE_MS = 150;
 
 function isEnoent(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
+function isEexist(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === 'EEXIST';
+}
+
+interface FileIdentity {
+  readonly birthtimeNs: bigint;
+  readonly dev: bigint;
+  readonly ino: bigint;
+}
+
+function fileIdentity(stats: {
+  readonly birthtimeNs: bigint;
+  readonly dev: bigint;
+  readonly ino: bigint;
+}): FileIdentity | undefined {
+  return stats.ino === 0n || stats.birthtimeNs === 0n
+    ? undefined
+    : { birthtimeNs: stats.birthtimeNs, dev: stats.dev, ino: stats.ino };
+}
+
+function sameFile(left: FileIdentity | undefined, right: FileIdentity | undefined): boolean {
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    left.birthtimeNs === right.birthtimeNs &&
+    left.dev === right.dev &&
+    left.ino === right.ino
+  );
+}
+
 export class FileStorageService implements IFileSystemStorageService {
   declare readonly _serviceBrand: undefined;
 
-  private readonly syncedDirs = new Set<string>();
+  private readonly durableEntries = new Map<string, FileIdentity>();
 
   constructor(
     private readonly baseDir: string,
@@ -97,8 +109,11 @@ export class FileStorageService implements IFileSystemStorageService {
     const filePath = this.path(scope, key);
     try {
       await mkdir(dirname(filePath), { recursive: true, mode: this.dirMode });
+      this.durableEntries.delete(filePath);
       await atomicWrite(filePath, data, undefined, this.fileMode);
-      await this.syncDirOnce(dirname(filePath));
+      const identity = fileIdentity(await stat(filePath, { bigint: true }));
+      await syncDir(dirname(filePath));
+      this.markDurable(filePath, identity);
     } catch (error) {
       throw toStorageIoError(error, { path: filePath, op: 'write' });
     }
@@ -115,7 +130,23 @@ export class FileStorageService implements IFileSystemStorageService {
     try {
       await mkdir(dir, { recursive: true, mode: this.dirMode });
 
-      const fh = await open(filePath, 'a', this.fileMode);
+      let fh: Awaited<ReturnType<typeof open>>;
+      while (true) {
+        try {
+          fh = await open(filePath, 'ax', this.fileMode);
+          this.durableEntries.delete(filePath);
+          break;
+        } catch (error) {
+          if (!isEexist(error)) throw error;
+        }
+        try {
+          fh = await open(filePath, constants.O_WRONLY | constants.O_APPEND);
+          break;
+        } catch (error) {
+          if (!isEnoent(error)) throw error;
+        }
+      }
+      let identity: FileIdentity | undefined;
       try {
         if (data.byteLength > 0) {
           await fh.writeFile(data);
@@ -123,10 +154,14 @@ export class FileStorageService implements IFileSystemStorageService {
         if (options.durable !== false) {
           await fh.sync();
         }
+        identity = fileIdentity(await fh.stat({ bigint: true }));
       } finally {
         await fh.close();
       }
-      await this.syncDirOnce(dir);
+      if (!sameFile(this.durableEntries.get(filePath), identity)) {
+        await syncDir(dir);
+        this.markDurable(filePath, identity);
+      }
     } catch (error) {
       throw toStorageIoError(error, { path: filePath, op: 'append' });
     }
@@ -147,8 +182,12 @@ export class FileStorageService implements IFileSystemStorageService {
     const filePath = this.path(scope, key);
     try {
       await unlink(filePath);
+      this.durableEntries.delete(filePath);
     } catch (error) {
-      if (isEnoent(error)) return;
+      if (isEnoent(error)) {
+        this.durableEntries.delete(filePath);
+        return;
+      }
       throw toStorageIoError(error, { path: filePath, op: 'delete' });
     }
   }
@@ -168,11 +207,6 @@ export class FileStorageService implements IFileSystemStorageService {
       timer = setTimeout(() => emitter.fire(), WATCH_DEBOUNCE_MS);
     };
 
-    // Watch the parent directory and filter by exact path: the directory survives
-    // atomic-replace renames (which would detach a single-file watcher) and it
-    // lets us observe a file that does not exist yet at subscription time. Events
-    // are debounced to collapse the burst a single save (plus its atomic-replace
-    // temp file) emits.
     const arm = (): void => {
       try {
         mkdirSync(dir, { recursive: true, mode: this.dirMode });
@@ -187,7 +221,6 @@ export class FileStorageService implements IFileSystemStorageService {
         watcher.on('error', (error: unknown) => onUnexpectedError(error));
         watcher.add(dir);
       } catch (error) {
-        // Best effort: callers can still reload explicitly when watching fails.
         onUnexpectedError(error);
       }
     };
@@ -223,9 +256,7 @@ export class FileStorageService implements IFileSystemStorageService {
     };
   }
 
-  async flush(): Promise<void> {
-    // Writes resolve only after the bytes are durable; nothing is buffered.
-  }
+  async flush(): Promise<void> {}
 
   async close(): Promise<void> {}
 
@@ -237,13 +268,11 @@ export class FileStorageService implements IFileSystemStorageService {
     return join(this.baseDir, scope);
   }
 
-  private async syncDirOnce(dir: string): Promise<void> {
-    if (this.syncedDirs.has(dir)) return;
-    try {
-      await syncDir(dir);
-      this.syncedDirs.add(dir);
-    } catch (error) {
-      if (!isEnoent(error)) throw error;
+  private markDurable(filePath: string, identity: FileIdentity | undefined): void {
+    if (identity === undefined) {
+      this.durableEntries.delete(filePath);
+    } else {
+      this.durableEntries.set(filePath, identity);
     }
   }
 }
