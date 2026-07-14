@@ -252,7 +252,7 @@ function makeFixture(options?: {
       [ISessionBtwService, { start: () => Promise.resolve('btw-1') }],
       [ISessionSwarmService, sessionSwarm],
       [ISessionSkillCatalog, { ready: Promise.resolve(), catalog: { listSkills: () => skillDefinitions } }],
-      [ISessionInitService, { generateAgentsMd: record('generateAgentsMd') }],
+      [ISessionInitService, { generateAgentsMd: record('generateAgentsMd'), cancelInit: record('cancelInit') }],
       [ISessionWorkspaceCommandService, { addAdditionalDir: recordReturning('addAdditionalDir', Promise.resolve(addDirResult)) }],
       [ISessionContext, { cwd: '/work' }],
       [ISessionMetadata, { read: () => Promise.resolve(sessionMeta) }],
@@ -375,6 +375,7 @@ describe('CoreSession conversation flow and agent routing', () => {
     await fx.core.cancelCompaction();
 
     expect(fx.calls['main.inject']).toEqual([[promptMessage(parts)]]);
+    expect(fx.calls['cancelInit']).toEqual([[]]);
     expect(fx.calls['main.cancel']).toEqual([[{}]]);
     expect(fx.calls['main.runShellCommand']).toEqual([[{ command: 'ls', commandId: 'c1' }]]);
     expect(shell).toEqual(fx.shellResult);

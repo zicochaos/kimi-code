@@ -175,6 +175,10 @@ export class CoreSession {
   }
 
   async cancel(options?: { agentId?: string }): Promise<void> {
+    // `/init` runs outside the main agent's loop turns (sessionInit spawns a
+    // coder subagent), so the RPC turn cancel alone cannot reach it;
+    // cancelInit is a no-op while idle and can be invoked unconditionally.
+    this.init.handle.accessor.get(ISessionInitService).cancelInit();
     const agent = await this.agent(options?.agentId);
     await agent.accessor.get(IAgentRPCService).cancel({});
   }
