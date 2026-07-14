@@ -148,11 +148,12 @@ export async function handleExportDebugZipCommand(host: SlashCommandHost): Promi
 }
 
 export async function handleInitCommand(host: SlashCommandHost): Promise<void> {
-  const session = host.session;
-  if (host.state.appState.model.trim().length === 0 || session === undefined) {
+  if (host.state.appState.model.trim().length === 0) {
     host.showError(LLM_NOT_SET_MESSAGE);
     return;
   }
+  const session = await host.ensureSession();
+  if (session === undefined) return;
 
   host.deferUserMessages = true;
   host.beginSessionRequest();

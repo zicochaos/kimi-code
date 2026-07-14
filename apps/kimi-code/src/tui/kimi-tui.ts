@@ -2722,7 +2722,9 @@ export class KimiTUI {
 
     const session = this.session;
     if (session === undefined) {
-      this.showError(NO_ACTIVE_SESSION_MESSAGE);
+      // Session-less startup: no session means no foreground task exists to
+      // detach — this is a plain no-op, not an error.
+      this.showStatus('No foreground task to detach.');
       return;
     }
 
