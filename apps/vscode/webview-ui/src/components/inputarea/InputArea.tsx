@@ -402,17 +402,35 @@ export function InputArea({ onAuthAction }: InputAreaProps) {
           <div className="flex items-center justify-between px-1.5 pb-1.5">
             <div className="flex items-center gap-1.5 min-w-0 flex-1">
               <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    className="gap-0.5 text-accent-foreground border-0! h-6 px-1.5 min-w-0 max-w-[calc(100%-4rem)]"
-                    disabled={isStreaming || !hasModels}
-                  >
-                    <span className="text-xs truncate block">{currentModelLabel}</span>
-                    {hasModels && <IconChevronDown className="size-3.5 shrink-0" />}
-                  </Button>
-                </DropdownMenuTrigger>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        className="gap-0.5 text-accent-foreground border-0! h-6 px-1.5 min-w-0 max-w-[calc(100%-4rem)]"
+                        disabled={isStreaming || !hasModels}
+                      >
+                        {/* Name stays readable longest: the dimmed provider
+                            suffix carries a higher shrink factor so space
+                            pressure truncates it before the model name, and
+                            below 520px it drops out entirely (still shown in
+                            the tooltip and the dropdown) — a narrow sidebar
+                            has no room for both. */}
+                        <span className="flex min-w-0 items-center text-xs">
+                          <span className="truncate">{currentModelConfig?.name ?? "No models available"}</span>
+                          {currentModelConfig !== undefined && showProviderGroups && (
+                            <span className="shrink-[3] truncate text-muted-foreground max-[520px]:hidden">
+                              {" · "}{providerDisplayName(currentModelConfig.provider)}
+                            </span>
+                          )}
+                        </span>
+                        {hasModels && <IconChevronDown className="size-3.5 shrink-0" />}
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>{currentModelLabel}</TooltipContent>
+                </Tooltip>
                 <DropdownMenuContent className="w-52!" align="start">
                   {modelGroups.map((group, groupIndex) => (
                     <Fragment key={group.provider}>
