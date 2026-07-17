@@ -1004,6 +1004,26 @@ describe('SessionSwarmService metadata compatibility', () => {
     );
   });
 
+  it('uses a selected model only for the spawned child binding', async () => {
+    const service = ix.get(ISessionSwarmService);
+
+    await service.run({
+      callerAgentId: 'main',
+      tasks: [{ ...spawnSessionTask('src/a.ts'), modelAlias: 'alternate' }],
+    });
+
+    expect(createAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        binding: {
+          profile: 'coder',
+          model: 'alternate',
+          thinking: 'medium',
+          cwd: '/repo',
+        },
+      }),
+    );
+  });
+
   it('inherits parent user tools on spawned children', async () => {
     const parentUserTools = userToolServiceStub();
     const childUserTools = userToolServiceStub();
@@ -1086,6 +1106,25 @@ describe('SessionSwarmService metadata compatibility', () => {
       { kind: 'prompt', prompt: 'Continue' },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('realigns resumed children to the selected model when provided', async () => {
+    agents['agent-existing'] = {
+      labels: { parentAgentId: 'main' },
+    };
+    const child = agentHandle('agent-existing', lifecycle, eventBus, {
+      profileName: 'explore',
+      modelAlias: 'stale-model',
+    });
+    handles.set('agent-existing', child);
+    const service = ix.get(ISessionSwarmService);
+
+    await service.run({
+      callerAgentId: 'main',
+      tasks: [{ ...resumeSessionTask('agent-existing'), modelAlias: 'alternate' }],
+    });
+
+    expect(child.accessor.get(IAgentProfileService).data().modelAlias).toBe('alternate');
   });
 
   it('does not emit spawned again when a rate-limited child retries', async () => {
@@ -1318,6 +1357,10 @@ function profileService(data: ProfileData): IAgentProfileService {
     data: () => current,
     update: (changed) => {
       current = { ...current, ...changed };
+    },
+    setModel: async (model) => {
+      current = { ...current, modelAlias: model };
+      return { model };
     },
   } as IAgentProfileService;
 }

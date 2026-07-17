@@ -141,13 +141,13 @@ export class SessionSwarmService implements ISessionSwarmService {
       throw new Error(`Unknown agent type: "${options.profileName}"`);
     }
     const callerData = caller.accessor.get(IAgentProfileService).data();
-    if (callerData.modelAlias === undefined) {
+    if (callerData.modelAlias === undefined && options.modelAlias === undefined) {
       throw new Error('Caller agent has no model bound');
     }
     const child = await this.lifecycle.create({
       binding: {
         profile: profile.name,
-        model: callerData.modelAlias,
+        model: options.modelAlias ?? callerData.modelAlias,
         thinking: callerData.thinkingLevel,
         cwd: callerData.cwd,
       },
@@ -189,7 +189,7 @@ export class SessionSwarmService implements ISessionSwarmService {
     const caller = this.requireHandle(callerAgentId, 'Caller agent');
     const child = this.requireHandle(agentId, 'Agent instance');
     this.requireIdleSubagent(agentId, child);
-    this.realignChildModel(caller, child);
+    await this.realignChildModel(caller, child, options.modelAlias);
     const profileName =
       child.accessor.get(IAgentProfileService).data().profileName ?? RESUMED_PROFILE_FALLBACK;
     if (!retryTurn) {
@@ -238,12 +238,21 @@ export class SessionSwarmService implements ISessionSwarmService {
     return handle;
   }
 
-  private realignChildModel(caller: IAgentScopeHandle, child: IAgentScopeHandle): void {
+  private async realignChildModel(
+    caller: IAgentScopeHandle,
+    child: IAgentScopeHandle,
+    selectedModelAlias?: string,
+  ): Promise<void> {
+    const childProfile = child.accessor.get(IAgentProfileService);
+    if (selectedModelAlias !== undefined) {
+      await childProfile.setModel(selectedModelAlias);
+      return;
+    }
     const modelAlias = caller.accessor.get(IAgentProfileService).data().modelAlias;
     if (modelAlias === undefined) {
       throw new Error('Caller agent has no model bound');
     }
-    child.accessor.get(IAgentProfileService).update({ modelAlias });
+    childProfile.update({ modelAlias });
   }
 
   private requireIdleSubagent(agentId: string, child: IAgentScopeHandle): void {

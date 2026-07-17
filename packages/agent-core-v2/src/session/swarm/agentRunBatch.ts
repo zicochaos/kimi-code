@@ -22,6 +22,7 @@ export interface AgentRunAttemptOptions {
   readonly prompt: string;
   readonly description: string;
   readonly swarmIndex?: number;
+  readonly modelAlias?: string;
   readonly runInBackground: boolean;
   readonly signal: AbortSignal;
   readonly onReady?: () => void;
@@ -282,6 +283,7 @@ export class AgentRunBatch<T> {
       prompt: task.prompt,
       description: task.description,
       swarmIndex: task.swarmIndex,
+      modelAlias: task.modelAlias,
       runInBackground: task.runInBackground,
       signal: attempt.controller.signal,
       onReady: () => {

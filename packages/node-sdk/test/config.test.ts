@@ -348,6 +348,17 @@ describe('KimiHarness config API', () => {
         enabled: false,
         source: 'default',
       },
+      {
+        id: 'subagent-model-selection',
+        title: 'Subagent model selection',
+        description:
+          'Expose configured model aliases to collaboration tools and allow Agent and AgentSwarm to select a model for delegated work.',
+        surface: 'core',
+        env: 'KIMI_CODE_EXPERIMENTAL_SUBAGENT_MODEL_SELECTION',
+        defaultEnabled: false,
+        enabled: false,
+        source: 'default',
+      },
     ]);
   });
 

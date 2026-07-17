@@ -56,6 +56,19 @@ import {
 } from '#/app/agentProfileCatalog/profile-shared';
 import { ILogService } from '#/_base/log/log';
 import { IConfigService } from '#/app/config/config';
+import { IFlagService } from '#/app/flag/flag';
+import { IModelCatalog } from '#/kosong/model/catalog';
+import { IModelService } from '#/kosong/model/model';
+import {
+  formatSubagentModelDirectory,
+  isSelectableSubagentModelAlias,
+  normalizeSubagentModelAlias,
+  parametersWithSubagentModelSelection,
+  resolvedSubagentModelDirectory,
+  SUBAGENT_MODEL_UNAVAILABLE_MESSAGE,
+  subagentApprovalAgentName,
+} from '#/tool/subagentModelSelection/modelDirectory';
+import { SUBAGENT_MODEL_SELECTION_FLAG_ID } from '#/tool/subagentModelSelection/flag';
 import { IAgentLifecycleService } from '#/session/agentLifecycle/agentLifecycle';
 import { isSubagentMeta, subagentLabels, subagentParentAgentId } from '#/session/agentLifecycle/subagentMetadata';
 import { ISessionProcessRunner } from '#/session/process/processRunner';
@@ -104,6 +117,13 @@ export const AgentToolInputSchema = z.preprocess(
       .describe(
         'One of the available agent types (see "Available agent types" in this tool description). Defaults to "coder" when omitted.',
       ),
+    model: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'Configured model alias for this subagent. Omit to inherit the caller model. See the available model directory in this tool description.',
+      ),
     resume: z
       .string()
       .optional()
@@ -147,10 +167,18 @@ const SUBAGENT_STOPPED_MESSAGE = 'The subagent was stopped before it finished.';
 
 export class AgentTool implements BuiltinTool<AgentToolInput> {
   readonly name: string = 'Agent';
-  readonly parameters: Record<string, unknown> = toInputJsonSchema(AgentToolInputSchema);
 
+  private readonly modelSelectionParameters = toInputJsonSchema(AgentToolInputSchema);
+  private readonly defaultParameters = parametersWithSubagentModelSelection(
+    this.modelSelectionParameters,
+    false,
+  );
   private readonly callerAgentId: string;
   private readonly canRunInBackground: () => boolean;
+
+  get parameters(): Record<string, unknown> {
+    return this.modelSelectionEnabled() ? this.modelSelectionParameters : this.defaultParameters;
+  }
 
   constructor(
     @IAgentLifecycleService private readonly lifecycle: IAgentLifecycleService,
@@ -167,6 +195,9 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     @ILogService private readonly log: ILogService,
     @IAgentPermissionModeService private readonly permissionMode: IAgentPermissionModeService,
     @IConfigService private readonly config: IConfigService,
+    @IFlagService private readonly flags: IFlagService,
+    @IModelService private readonly models: IModelService,
+    @IModelCatalog private readonly modelCatalog: IModelCatalog,
   ) {
     this.callerAgentId = scopeContext.agentId;
     this.canRunInBackground = () =>
@@ -191,12 +222,42 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       (profile, name, source) =>
         this.toolPolicy.isToolActiveForProfile(profile, name, source),
     );
-    return typeLines
+    const profileDescription = typeLines
       ? `${baseDescription}\n\nAvailable agent types (pass via subagent_type):\n${typeLines}`
       : baseDescription;
+    return this.modelSelectionEnabled()
+      ? `${profileDescription}\n\n${formatSubagentModelDirectory(this.modelDirectory())}`
+      : profileDescription;
   }
 
   async resolveExecution(args: AgentToolInput): Promise<ToolExecution> {
+    const modelSelectionEnabled = this.modelSelectionEnabled();
+    if (args.model !== undefined && !modelSelectionEnabled) {
+      return {
+        output:
+          'Subagent model selection is disabled. Enable the subagent-model-selection experimental feature to use model.',
+        isError: true,
+      };
+    }
+
+    let modelAlias: string | undefined;
+    try {
+      modelAlias = normalizeSubagentModelAlias(args.model);
+      if (modelAlias !== undefined) {
+        const directory = this.modelDirectory();
+        if (
+          directory.models === undefined ||
+          !isSelectableSubagentModelAlias(directory.models, modelAlias)
+        ) {
+          throw new Error(SUBAGENT_MODEL_UNAVAILABLE_MESSAGE);
+        }
+        this.modelCatalog.get(modelAlias);
+      }
+    } catch (error) {
+      this.log.warn('subagent model selection failed', { modelAlias: args.model, error });
+      return { output: `subagent error: ${SUBAGENT_MODEL_UNAVAILABLE_MESSAGE}`, isError: true };
+    }
+
     const requestedProfileName = args.subagent_type?.length ? args.subagent_type : undefined;
     const resumeAgentId = args.resume?.trim();
 
@@ -212,20 +273,33 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       resumeAgentId !== undefined && resumeAgentId.length > 0
         ? this.resumeProfileName(resumeAgentId) ?? RESUMED_LABEL
         : requestedProfileName ?? DEFAULT_PROFILE_NAME;
+    const approvalAgentName = subagentApprovalAgentName(profileNameForDisplay, modelAlias);
     const prefix = args.run_in_background === true ? 'Launching background' : 'Launching';
     return {
-      description: `${prefix} ${profileNameForDisplay} agent: ${args.description}`,
+      description: `${prefix} ${approvalAgentName} agent: ${args.description}`,
       accesses: ToolAccesses.none(),
       display: {
         kind: 'agent_call',
-        agent_name: profileNameForDisplay,
+        agent_name: approvalAgentName,
         prompt: args.prompt,
         background: args.run_in_background,
       },
       approvalRule: this.name,
-      matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, profileNameForDisplay),
-      execute: (ctx) => this.execution(args, ctx),
+      matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, approvalAgentName),
+      execute: (ctx) => this.execution(args, ctx, modelAlias, modelSelectionEnabled),
     };
+  }
+
+  private modelSelectionEnabled(): boolean {
+    return this.flags.enabled(SUBAGENT_MODEL_SELECTION_FLAG_ID);
+  }
+
+  private modelDirectory() {
+    return resolvedSubagentModelDirectory(
+      this.models,
+      this.modelCatalog,
+      this.profile.data().modelAlias,
+    );
   }
 
   private resumeProfileName(agentId: string): string | undefined {
@@ -238,6 +312,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     args: AgentToolInput,
     toolCallId: string,
     controller: AbortController,
+    modelAlias?: string,
   ): Promise<SubagentHandle> {
     const requester = this.lifecycle.get(this.callerAgentId);
     if (requester === undefined) {
@@ -256,7 +331,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         throw new Error(`Agent instance "${resumeAgentId}" does not exist`);
       }
       await this.ensureOwnedIdleSubagent(resumeAgentId, target);
-      this.realignChildModel(target);
+      await this.realignChildModel(target, modelAlias);
       agentId = target.id;
       profileName =
         target.accessor.get(IAgentProfileService).data().profileName ?? RESUMED_LABEL;
@@ -274,13 +349,13 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       if (profile === undefined) {
         throw new Error(`Unknown agent type: "${requestedProfileName}"`);
       }
-      if (own.modelAlias === undefined) {
+      if (own.modelAlias === undefined && modelAlias === undefined) {
         throw new Error('Caller agent has no model bound');
       }
       const created = await this.lifecycle.create({
         binding: {
           profile: profile.name,
-          model: own.modelAlias,
+          model: modelAlias ?? own.modelAlias,
           thinking: own.thinkingLevel,
           cwd: own.cwd,
         },
@@ -343,20 +418,37 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     }
   }
 
-  private realignChildModel(target: IAgentScopeHandle): void {
+  private async realignChildModel(
+    target: IAgentScopeHandle,
+    selectedModelAlias?: string,
+  ): Promise<void> {
+    const targetProfile = target.accessor.get(IAgentProfileService);
+    if (selectedModelAlias !== undefined) {
+      await targetProfile.setModel(selectedModelAlias);
+      return;
+    }
     const modelAlias = this.profile.data().modelAlias;
     if (modelAlias === undefined) {
       throw new Error('Caller agent has no model bound');
     }
-    target.accessor.get(IAgentProfileService).update({ modelAlias });
+    targetProfile.update({ modelAlias });
   }
 
   private async execution(
     args: AgentToolInput,
     { toolCallId, signal }: ExecutableToolContext,
+    modelAlias: string | undefined,
+    modelSelectionEnabled: boolean,
   ): Promise<ExecutableToolResult> {
     try {
       signal.throwIfAborted();
+      if (args.model !== undefined && !modelSelectionEnabled) {
+        return {
+          output:
+            'Subagent model selection is disabled. Enable the subagent-model-selection experimental feature to use model.',
+          isError: true,
+        };
+      }
       const runInBackground = args.run_in_background === true;
       const requestedProfileName = args.subagent_type?.length ? args.subagent_type : undefined;
       const resumeAgentId = args.resume?.trim();
@@ -382,7 +474,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
 
       let handle: SubagentHandle;
       try {
-        handle = await this.launch(args, toolCallId, controller);
+        handle = await this.launch(args, toolCallId, controller, modelAlias);
       } catch (error) {
         signal.removeEventListener('abort', abortBeforeRegister);
         this.log.warn('subagent launch failed', {

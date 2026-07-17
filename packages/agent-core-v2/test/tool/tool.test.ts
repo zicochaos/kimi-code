@@ -47,6 +47,7 @@ import { IEventBus, type DomainEvent } from '#/app/event/eventBus';
 import type { AgentProfile } from '#/app/agentProfileCatalog/agentProfileCatalog';
 import { ITelemetryService, noopTelemetryService } from '#/app/telemetry/telemetry';
 import { ISessionCronService } from '#/session/cron/sessionCronService';
+import { IFlagService } from '#/app/flag/flag';
 import { ISessionMetadata, type AgentMeta } from '#/session/sessionMetadata/sessionMetadata';
 import { ISessionAgentProfileCatalog } from '#/session/sessionAgentProfileCatalog/sessionAgentProfileCatalog';
 import type {
@@ -58,6 +59,7 @@ import type { IProcess, ISessionProcessRunner } from '#/session/process/processR
 import { IWireService } from '#/wire/wire';
 import { createFakeProcessRunner } from '../tools/fixtures/fake-exec';
 import {
+  appService,
   configServices,
   createCommandRunner,
   createTestAgent,
@@ -70,6 +72,7 @@ import {
   type TestAgentOptions,
   type TestAgentServiceOverride,
 } from '../harness';
+import { stubFlag } from '../app/flag/stubs';
 import { executeTool } from '../tools/fixtures/execute-tool';
 
 const signal = new AbortController().signal;
@@ -405,11 +408,11 @@ describe('AgentToolInputSchema', () => {
     expect((properties['resume']?.description ?? '').toLowerCase()).toContain('subagent_type');
   });
 
-  it('does not expose timeout or model parameters in the JSON schema', () => {
-    const properties = agentSchemaProperties();
+  it('declares model in the full schema for flag-gated projection', () => {
+    const properties = agentSchemaProperties<{ description?: string }>();
 
     expect(properties).not.toHaveProperty('timeout');
-    expect(properties).not.toHaveProperty('model');
+    expect(properties['model']?.description).toContain('Configured model alias');
   });
 
   it('normalizes the default subagent type into tool args', () => {
@@ -458,6 +461,45 @@ describe('Agent tool description', () => {
     expect(description).not.toContain('operator-configured background timeout');
     expect(description).not.toContain('no time limit');
     expect(description).toContain('Default to a foreground subagent');
+  });
+
+  it('hides model selection when the experimental flag is disabled', () => {
+    ctx = createTestAgent(appService(IFlagService, stubFlag(false)));
+
+    const tool = ctx.toolsData().find((entry) => entry.name === 'Agent');
+
+    expect(tool?.parameters).not.toHaveProperty('properties.model');
+    expect(tool?.description).not.toContain('Available configured models for subagents');
+  });
+
+  it('exposes only materializable model aliases when the experimental flag is enabled', () => {
+    ctx = createTestAgent(
+      appService(IFlagService, stubFlag((id) => id === 'subagent-model-selection')),
+      {
+        initialConfig: {
+          models: {
+            alternate: {
+              provider: 'test-provider',
+              model: 'alternate-wire',
+              maxContextSize: 123_000,
+              capabilities: ['tool_use'],
+            },
+            broken: {
+              provider: 'missing-provider',
+              model: 'broken-wire',
+              maxContextSize: 1,
+            },
+          },
+        },
+      },
+    );
+
+    const tool = ctx.toolsData().find((entry) => entry.name === 'Agent');
+
+    expect(tool?.parameters).toHaveProperty('properties.model');
+    expect(tool?.description).toContain('- "alternate": context=123000');
+    expect(tool?.description).not.toContain('broken');
+    expect(tool?.description).not.toContain('test-key');
   });
 
   it('renders the tool set for each subagent type', () => {
@@ -790,6 +832,63 @@ describe('Agent tool execution contract', () => {
       output: 'Cannot set subagent_type when resuming an existing agent. Resume by agent id only.',
     });
     expect(lifecycle.run).not.toHaveBeenCalled();
+  });
+
+  it('rejects model when the experimental flag is disabled', async () => {
+    const lifecycle = createAgentLifecycleStub();
+    const context = createAgentToolContext(
+      lifecycle,
+      appService(IFlagService, stubFlag(false)),
+    );
+
+    const execution = await agentTool(context).resolveExecution({
+      prompt: 'Investigate',
+      description: 'Find cause',
+      model: 'mock-model',
+    });
+
+    expect(execution).toMatchObject({
+      isError: true,
+      output: expect.stringContaining('Subagent model selection is disabled'),
+    });
+    expect(lifecycle.create).not.toHaveBeenCalled();
+  });
+
+  it('overrides only the child model binding when the experimental flag is enabled', async () => {
+    const lifecycle = createAgentLifecycleStub({ createAgentIds: ['agent-child'] });
+    const context = createAgentToolContext(
+      lifecycle,
+      appService(IFlagService, stubFlag((id) => id === 'subagent-model-selection')),
+      {
+        initialConfig: {
+          models: {
+            alternate: {
+              provider: 'test-provider',
+              model: 'alternate-wire',
+              maxContextSize: 123_000,
+            },
+          },
+        },
+      },
+    );
+
+    await executeAgentTool(context, {
+      prompt: 'Investigate',
+      description: 'Find cause',
+      subagent_type: 'explore',
+      model: 'alternate',
+    });
+
+    expect(lifecycle.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        binding: {
+          profile: 'explore',
+          model: 'alternate',
+          thinking: 'off',
+          cwd: expect.any(String),
+        },
+      }),
+    );
   });
 
   it('spawns a foreground subagent and returns its summary', async () => {
@@ -1664,7 +1763,7 @@ describe('AgentSwarmToolInputSchema', () => {
     expect(Object.keys(properties).at(-1)).toBe('resume_agent_ids');
     expect(properties).not.toHaveProperty('run_in_background');
     expect(properties).not.toHaveProperty('timeout');
-    expect(properties).not.toHaveProperty('model');
+    expect(properties['model']?.description).toContain('Configured model alias');
   });
 });
 
@@ -1690,6 +1789,18 @@ describe('AgentSwarm tool description', () => {
     expect(description).toContain('{{item}}');
     expect(description.toLowerCase()).toContain('distinct');
     expect(description).toContain('128 subagents');
+  });
+
+  it('exposes the same safe model directory when the experimental flag is enabled', () => {
+    ctx = createTestAgent(
+      appService(IFlagService, stubFlag((id) => id === 'subagent-model-selection')),
+    );
+
+    const tool = ctx.toolsData().find((entry) => entry.name === 'AgentSwarm');
+
+    expect(tool?.parameters).toHaveProperty('properties.model');
+    expect(tool?.description).toContain('Available configured models for subagents');
+    expect(tool?.description).not.toContain('test-key');
   });
 
   it('states AgentSwarm must be the only tool call in a response', () => {
@@ -1780,6 +1891,58 @@ describe('AgentSwarm tool execution contract', () => {
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
+  });
+
+  it('passes the selected model to item spawns and resumes', async () => {
+    const runSwarm = vi.fn(
+      async (
+        args: SessionSwarmRunArgs<unknown>,
+      ): Promise<readonly SessionSwarmRunResult<unknown>[]> =>
+        args.tasks.map((task) => ({ task, status: 'completed' as const, result: 'ok' })),
+    );
+    const swarmService: ISessionSwarmService = {
+      _serviceBrand: undefined,
+      getSwarmItem: async () => undefined,
+      run: runSwarm as ISessionSwarmService['run'],
+      cancel: () => {},
+    };
+    ctx = createTestAgent(
+      swarmServices(swarmService),
+      appService(IFlagService, stubFlag((id) => id === 'subagent-model-selection')),
+      {
+        initialConfig: {
+          models: {
+            alternate: {
+              provider: 'test-provider',
+              model: 'alternate-wire',
+              maxContextSize: 123_000,
+            },
+          },
+        },
+      },
+    );
+
+    await executeTool(agentSwarmTool(ctx), {
+      turnId: 0,
+      toolCallId: 'call_swarm',
+      args: {
+        description: 'Review files',
+        model: 'alternate',
+        prompt_template: 'Review {{item}}',
+        items: ['src/new.ts'],
+        resume_agent_ids: { 'agent-old': 'Continue' },
+      },
+      signal,
+    });
+
+    expect(runSwarm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tasks: [
+          expect.objectContaining({ kind: 'resume', modelAlias: 'alternate' }),
+          expect.objectContaining({ kind: 'spawn', modelAlias: 'alternate' }),
+        ],
+      }),
+    );
   });
 
   it('resumes mapped agents before spawning item subagents', async () => {

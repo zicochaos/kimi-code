@@ -3,6 +3,9 @@
  * layer) so importing the package loads all scoped-registry registrations.
  */
 
+import '#/agent/profile/configSection';
+import '#/tool/subagentModelSelection/flag';
+
 export * from '#/_base/di/descriptors';
 export * from '#/_base/di/errors';
 export * from '#/_base/di/extensions';
@@ -192,6 +195,8 @@ export * from '#/app/flag/flagRegistry';
 export * from '#/app/flag/flagRegistryService';
 export * from '#/app/flag/flag';
 export * from '#/app/flag/flagService';
+
+export * from '#/tool/subagentModelSelection/flag';
 
 export * from '#/agent/activityView/activityView';
 import '#/agent/activityView/activityViewService';
@@ -452,6 +457,7 @@ import '#/agent/permissionRules/configSection';
 export * from '#/agent/permissionRules/permissionRules';
 export * from '#/agent/permissionRules/matchesRule';
 export * from '#/agent/permissionRules/permissionRulesService';
+export * from '#/agent/profile/configSection';
 export * from '#/agent/profile/profile';
 export * from '#/agent/profile/profileService';
 export * from '#/agent/profile/context';
