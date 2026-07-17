@@ -46,6 +46,7 @@ describe('resolveGitlabSource', () => {
     });
     expect(fetch).toHaveBeenCalledWith(
       'https://gitlab.example.com/api/v4/projects/team%2Fsample/releases/permalink/latest',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 

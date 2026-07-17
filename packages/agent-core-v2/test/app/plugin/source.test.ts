@@ -1,3 +1,10 @@
+/**
+ * Scenario: plugin installation source classification from paths and repository URLs.
+ * Responsibilities: distinguish local, zip, GitHub, and GitLab sources and preserve refs.
+ * Wiring: pure source resolver with no external collaborators or stubbed boundaries.
+ * Run: pnpm --filter @moonshot-ai/agent-core-v2 exec vitest run test/app/plugin/source.test.ts
+ */
+
 import { describe, expect, it } from 'vitest';
 
 import { resolveInstallSource } from '#/app/plugin/source';
@@ -35,18 +42,24 @@ describe('resolveInstallSource', () => {
     });
   });
 
-  it('resolves GitLab.com and self-managed GitLab URLs', () => {
+  it('recognizes a bare GitLab.com URL with nested groups', () => {
     expect(resolveInstallSource('https://gitlab.com/team/plugins/sample')).toEqual({
       kind: 'gitlab',
       baseUrl: 'https://gitlab.com',
       projectPath: 'team/plugins/sample',
     });
+  });
+
+  it('recognizes a tree ref on a self-managed GitLab hostname', () => {
     expect(resolveInstallSource('https://gitlab.example.com/team/sample/-/tree/main')).toEqual({
       kind: 'gitlab',
       baseUrl: 'https://gitlab.example.com',
       projectPath: 'team/sample',
       ref: { kind: 'branch', value: 'main' },
     });
+  });
+
+  it('uses a .git suffix to recognize an arbitrary self-managed hostname', () => {
     expect(resolveInstallSource('https://code.example.com/team/sample.git')).toEqual({
       kind: 'gitlab',
       baseUrl: 'https://code.example.com',

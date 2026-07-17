@@ -32,7 +32,7 @@ async function tryResolveLatestReleaseTag(
 ): Promise<string | undefined> {
   const projectId = encodeURIComponent(input.projectPath);
   const url = `${input.baseUrl}/api/v4/projects/${projectId}/releases/permalink/latest`;
-  const resp = await fetch(url);
+  const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
   if (resp.status === 404) return undefined;
   if (!resp.ok) {
     throw new Error(
