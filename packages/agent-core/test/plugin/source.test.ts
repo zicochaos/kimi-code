@@ -243,6 +243,17 @@ describe('resolveInstallSource', () => {
       });
     });
 
+    it.each(['mygitlab.example.com', 'gitlab01.example.com'])(
+      'recognizes a self-managed hostname containing GitLab: %s',
+      (hostname) => {
+        expect(resolveInstallSource(`https://${hostname}/team/sample`)).toEqual({
+          kind: 'gitlab',
+          baseUrl: `https://${hostname}`,
+          projectPath: 'team/sample',
+        });
+      },
+    );
+
     it('uses a .git suffix to recognize an arbitrary self-managed host', () => {
       expect(resolveInstallSource('https://code.example.com/team/sample.git')).toEqual({
         kind: 'gitlab',

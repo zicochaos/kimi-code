@@ -54,6 +54,17 @@ describe('resolveInstallSource', () => {
     });
   });
 
+  it.each(['mygitlab.example.com', 'gitlab01.example.com'])(
+    'recognizes a self-managed hostname containing GitLab: %s',
+    (hostname) => {
+      expect(resolveInstallSource(`https://${hostname}/team/sample`)).toEqual({
+        kind: 'gitlab',
+        baseUrl: `https://${hostname}`,
+        projectPath: 'team/sample',
+      });
+    },
+  );
+
   it('rejects relative paths', () => {
     expect(() => resolveInstallSource('./plugin')).toThrow('absolute path');
   });

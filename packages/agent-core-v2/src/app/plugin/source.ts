@@ -52,7 +52,7 @@ function parseGitlabUrl(raw: string): ResolvedSource | undefined {
   if (projectSegments.length < 2 || repoRaw === undefined) return undefined;
 
   const hasGitSuffix = repoRaw.endsWith('.git');
-  const isGitlabHost = url.hostname.toLowerCase().split('.').includes('gitlab');
+  const isGitlabHost = url.hostname.toLowerCase().includes('gitlab');
   if (!isGitlabHost && separatorIndex === -1 && !hasGitSuffix) return undefined;
   if (separatorIndex === -1 && (segments[0] === 'api' || repoRaw.endsWith('.zip'))) {
     return undefined;

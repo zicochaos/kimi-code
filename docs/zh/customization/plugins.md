@@ -48,14 +48,14 @@ Plugins 把可复用的 Kimi Code CLI 能力打包成可安装单元——可以
 
 ### 从 GitLab 安装
 
-通过 `/plugins install <url>` 可以从 GitLab.com 或自托管 GitLab 实例安装，支持四种 URL 形式：
+通过 `/plugins install <url>` 可以从 GitLab.com 或部署在站点根路径的自托管 GitLab 实例安装，支持四种 URL 形式：
 
 - `https://gitlab.example.com/<namespace>/<project>`：安装最新 release；无 release 时回落到默认分支
 - `https://gitlab.example.com/<namespace>/<project>/-/tree/<ref>`：安装指定分支、tag 或短 commit SHA
 - `https://gitlab.example.com/<namespace>/<project>/-/releases/<tag>`：钉死具体 tag
 - `https://gitlab.example.com/<namespace>/<project>/-/commit/<sha>`：钉死具体 commit
 
-GitLab.com 和主机名中含 `gitlab` 的自托管实例会被自动识别。若自托管实例使用其他主机名，请使用以 `.git` 结尾的 HTTPS 克隆 URL，例如 `https://code.example.com/<namespace>/<project>.git`。GitLab 下载只调用所选实例的 `/api/v4` release 与仓库归档端点。
+GitLab.com 和主机名中含 `gitlab` 的自托管实例会被自动识别。若自托管实例使用其他主机名，请使用以 `.git` 结尾的 HTTPS 克隆 URL，例如 `https://code.example.com/<namespace>/<project>.git`。暂不支持配置了相对 URL 根路径（例如 `https://code.example.com/gitlab`）的自托管实例。GitLab 下载只调用所选实例的 `/api/v4` release 与仓库归档端点。
 
 ### 注意事项
 

@@ -48,14 +48,14 @@ Network requests only go through `github.com` redirects and `codeload.github.com
 
 ### Installing from GitLab
 
-Use `/plugins install <url>` to install from GitLab.com or a self-managed GitLab instance. Four URL forms are supported:
+Use `/plugins install <url>` to install from GitLab.com or a self-managed GitLab instance served from the root of its origin. Four URL forms are supported:
 
 - `https://gitlab.example.com/<namespace>/<project>`: Install the latest release; falls back to the default branch if no release exists
 - `https://gitlab.example.com/<namespace>/<project>/-/tree/<ref>`: Install a specific branch, tag, or short commit SHA
 - `https://gitlab.example.com/<namespace>/<project>/-/releases/<tag>`: Pin to a specific tag
 - `https://gitlab.example.com/<namespace>/<project>/-/commit/<sha>`: Pin to a specific commit
 
-GitLab.com and self-managed hostnames containing `gitlab` are detected automatically. For a self-managed instance with a different hostname, use its HTTPS clone URL ending in `.git`, such as `https://code.example.com/<namespace>/<project>.git`. GitLab downloads use the selected instance's `/api/v4` release and repository archive endpoints.
+GitLab.com and self-managed hostnames containing `gitlab` are detected automatically. For a self-managed instance with a different hostname, use its HTTPS clone URL ending in `.git`, such as `https://code.example.com/<namespace>/<project>.git`. Self-managed instances configured with a relative URL root, such as `https://code.example.com/gitlab`, are not currently supported. GitLab downloads use the selected instance's `/api/v4` release and repository archive endpoints.
 
 ### Notes
 
