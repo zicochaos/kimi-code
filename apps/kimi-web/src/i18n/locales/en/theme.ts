@@ -10,4 +10,10 @@ export default {
   fontDefault: 'Default',
   fontSystem: 'System',
   fontSerif: 'Serif',
+  fontCustom: 'Custom',
+  fontCustomLabel: 'Custom UI font',
+  fontCustomHint: 'Locally installed font name(s)',
+  fontCustomPlaceholder: 'e.g. Maple Mono NF CN',
+  codeFontLabel: 'Code font',
+  codeFontCustomLabel: 'Custom code font',
 } as const;

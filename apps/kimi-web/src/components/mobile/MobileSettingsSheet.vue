@@ -10,7 +10,7 @@ import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { ConversationStatus, PermissionMode } from '../../types';
 import type { AppModel, AppSession, ThinkingLevel } from '../../api/types';
-import type { ColorScheme, UiFontFamily } from '../../composables/useKimiWebClient';
+import type { CodeFontFamily, ColorScheme, UiFontFamily } from '../../composables/useKimiWebClient';
 import { useKimiWebClient } from '../../composables/useKimiWebClient';
 import {
   commitLevel,
@@ -38,6 +38,9 @@ const props = withDefaults(
     colorScheme?: ColorScheme;
     uiFontSize?: number;
     uiFontFamily?: UiFontFamily;
+    uiCustomFont?: string;
+    codeFontFamily?: CodeFontFamily;
+    codeCustomFont?: string;
     authReady?: boolean;
     conversationToc?: boolean;
     /** Server version from GET /api/v1/meta, shown as a read-only row. */
@@ -49,6 +52,9 @@ const props = withDefaults(
     colorScheme: 'system',
     uiFontSize: 14,
     uiFontFamily: 'default',
+    uiCustomFont: '',
+    codeFontFamily: 'default',
+    codeCustomFont: '',
     authReady: false,
     serverVersion: '',
     models: () => [],
@@ -65,6 +71,9 @@ const emit = defineEmits<{
   setColorScheme: [colorScheme: ColorScheme];
   setUiFontSize: [size: number];
   setUiFontFamily: [font: UiFontFamily];
+  setUiCustomFont: [name: string];
+  setCodeFontFamily: [font: CodeFontFamily];
+  setCodeCustomFont: [name: string];
   setConversationToc: [on: boolean];
   login: [];
   logout: [];
@@ -76,6 +85,10 @@ function onColorScheme(v: string): void {
 
 function onUiFontFamily(v: string): void {
   emit('setUiFontFamily', v as UiFontFamily);
+}
+
+function onCodeFontFamily(v: string): void {
+  emit('setCodeFontFamily', v as CodeFontFamily);
 }
 
 const PERM_MODES: PermissionMode[] = ['manual', 'auto', 'yolo'];
@@ -381,9 +394,55 @@ watch(
           { value: 'default', label: t('theme.fontDefault') },
           { value: 'system', label: t('theme.fontSystem') },
           { value: 'serif', label: t('theme.fontSerif') },
+          { value: 'custom', label: t('theme.fontCustom') },
         ]"
         @update:model-value="onUiFontFamily"
       />
+    </div>
+
+    <div v-if="uiFontFamily === 'custom'" class="srow read-only pref">
+      <span class="srow-main">
+        <span class="srow-label">{{ t('theme.fontCustomLabel') }}</span>
+      </span>
+      <span class="font-input">
+        <Input
+          size="sm"
+          :model-value="uiCustomFont"
+          :placeholder="t('theme.fontCustomPlaceholder')"
+          :aria-label="t('theme.fontCustomLabel')"
+          @update:model-value="emit('setUiCustomFont', $event)"
+        />
+      </span>
+    </div>
+
+    <div class="srow read-only pref">
+      <span class="srow-main">
+        <span class="srow-label">{{ t('theme.codeFontLabel') }}</span>
+      </span>
+      <SegmentedControl
+        :model-value="codeFontFamily"
+        :options="[
+          { value: 'default', label: t('theme.fontDefault') },
+          { value: 'system', label: t('theme.fontSystem') },
+          { value: 'custom', label: t('theme.fontCustom') },
+        ]"
+        @update:model-value="onCodeFontFamily"
+      />
+    </div>
+
+    <div v-if="codeFontFamily === 'custom'" class="srow read-only pref">
+      <span class="srow-main">
+        <span class="srow-label">{{ t('theme.codeFontCustomLabel') }}</span>
+      </span>
+      <span class="font-input">
+        <Input
+          size="sm"
+          :model-value="codeCustomFont"
+          :placeholder="t('theme.fontCustomPlaceholder')"
+          :aria-label="t('theme.codeFontCustomLabel')"
+          @update:model-value="emit('setCodeCustomFont', $event)"
+        />
+      </span>
     </div>
 
     <button type="button" class="srow" @click="emit('setConversationToc', !conversationToc)">
@@ -583,6 +642,10 @@ watch(
   font-family: var(--font-mono);
   font-size: var(--ui-font-size-xs);
 }
+
+/* Custom font-name input (font family preference): fixed-width field on the
+   control side of the preference row. */
+.font-input { width: 180px; flex: none; }
 
 /* Account rows */
 .srow.acct.in .srow-label { color: var(--color-accent-hover); font-weight: 500; }

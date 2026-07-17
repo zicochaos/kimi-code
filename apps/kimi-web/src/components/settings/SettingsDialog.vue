@@ -11,13 +11,14 @@ import { useDialogFocus } from '../../composables/useDialogFocus';
 import LanguageSwitcher from './LanguageSwitcher.vue';
 import { serverEndpointLabel } from '../../api/config';
 import { downloadTraceLog, isTraceEnabled } from '../../debug/trace';
-import type { Accent, ColorScheme, UiFontFamily } from '../../composables/useKimiWebClient';
+import type { Accent, CodeFontFamily, ColorScheme, UiFontFamily } from '../../composables/useKimiWebClient';
 import type { AppConfig, AppModel } from '../../api/types';
 import Dialog from '../ui/Dialog.vue';
 import Switch from '../ui/Switch.vue';
 import Button from '../ui/Button.vue';
 import SegmentedControl from '../ui/SegmentedControl.vue';
 import Select from '../ui/Select.vue';
+import Input from '../ui/Input.vue';
 import Tooltip from '../ui/Tooltip.vue';
 
 const { t } = useI18n();
@@ -27,6 +28,9 @@ const props = defineProps<{
   accent: Accent;
   uiFontSize: number;
   uiFontFamily: UiFontFamily;
+  uiCustomFont: string;
+  codeFontFamily: CodeFontFamily;
+  codeCustomFont: string;
   authReady: boolean;
   accountModel?: string | null;
   /** Browser-notification-on-completion preference. */
@@ -58,6 +62,9 @@ const emit = defineEmits<{
   setAccent: [accent: Accent];
   setUiFontSize: [size: number];
   setUiFontFamily: [font: UiFontFamily];
+  setUiCustomFont: [name: string];
+  setCodeFontFamily: [font: CodeFontFamily];
+  setCodeCustomFont: [name: string];
   setNotify: [on: boolean];
   setNotifyQuestion: [on: boolean];
   setNotifyApproval: [on: boolean];
@@ -392,9 +399,50 @@ function archiveTime(iso: string): string {
                   { value: 'default', label: t('theme.fontDefault') },
                   { value: 'system', label: t('theme.fontSystem') },
                   { value: 'serif', label: t('theme.fontSerif') },
+                  { value: 'custom', label: t('theme.fontCustom') },
                 ]"
                 @update:model-value="emit('setUiFontFamily', $event as UiFontFamily)"
               />
+            </div>
+            <div v-if="uiFontFamily === 'custom'" class="row">
+              <span class="rlabel">
+                {{ t('theme.fontCustomLabel') }}
+                <span class="hint">{{ t('theme.fontCustomHint') }}</span>
+              </span>
+              <div class="select-wrap">
+                <Input
+                  :model-value="uiCustomFont"
+                  :placeholder="t('theme.fontCustomPlaceholder')"
+                  :aria-label="t('theme.fontCustomLabel')"
+                  @update:model-value="emit('setUiCustomFont', $event)"
+                />
+              </div>
+            </div>
+            <div class="row">
+              <span class="rlabel">{{ t('theme.codeFontLabel') }}</span>
+              <SegmentedControl
+                :model-value="codeFontFamily"
+                :options="[
+                  { value: 'default', label: t('theme.fontDefault') },
+                  { value: 'system', label: t('theme.fontSystem') },
+                  { value: 'custom', label: t('theme.fontCustom') },
+                ]"
+                @update:model-value="emit('setCodeFontFamily', $event as CodeFontFamily)"
+              />
+            </div>
+            <div v-if="codeFontFamily === 'custom'" class="row">
+              <span class="rlabel">
+                {{ t('theme.codeFontCustomLabel') }}
+                <span class="hint">{{ t('theme.fontCustomHint') }}</span>
+              </span>
+              <div class="select-wrap">
+                <Input
+                  :model-value="codeCustomFont"
+                  :placeholder="t('theme.fontCustomPlaceholder')"
+                  :aria-label="t('theme.codeFontCustomLabel')"
+                  @update:model-value="emit('setCodeCustomFont', $event)"
+                />
+              </div>
             </div>
             <div class="row">
               <span class="rlabel">{{ t('sidebar.language') }}</span>

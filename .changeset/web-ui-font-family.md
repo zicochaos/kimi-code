@@ -2,4 +2,4 @@
 "@moonshot-ai/kimi-code": patch
 ---
 
-web: Add a font family preference to Appearance settings (desktop dialog + mobile sheet) with Default (Inter), System, and Serif faces. The choice remaps the `--font-ui` token via `<html data-ui-font-family>`, so UI and reading text switch fonts while code stays monospace; both alternate stacks use locally installed fonts, so nothing extra is downloaded.
+web: Add font family preferences to Appearance settings (desktop dialog + mobile sheet). The UI/reading font offers Default (Inter), System, Serif, and Custom faces; the code font offers Default (JetBrains Mono), System, and Custom. Custom accepts any locally installed font name (e.g. Maple Mono NF CN) with the default stack appended as fallback, so nothing extra is downloaded. Choices remap the `--font-ui` / `--font-mono` tokens via `<html data-ui-font-family>` / `<html data-code-font-family>`, so every surface picks them up with no component changes; the xterm terminal keeps its fixed literal stack.

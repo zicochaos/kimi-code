@@ -251,8 +251,8 @@ onUnmounted(() => {
             <div class="code"><div class="code-bar"><span class="d"></span><span class="d"></span><span class="d"></span><span class="fn">--font-mono</span></div><pre>--font-mono: "JetBrains Mono Variable", "JetBrains Mono",
       ui-monospace, "SF Mono", Menlo, Consolas, monospace;</pre></div>
 
-            <h4 class="mini">Font family preference</h4>
-            <p>Settings → Appearance → Font remaps <code>--font-ui</code> through <code>&lt;html data-ui-font-family&gt;</code>: <b>default</b> keeps the Inter stack, <b>system</b> switches to <code>--font-ui-system</code> (the platform's native UI face), <b>serif</b> to <code>--font-ui-serif</code> (a reading-oriented serif with serif CJK fallbacks). <code>--font-display</code> and <code>--sans</code> follow automatically since they reference <code>var(--font-ui)</code>; <code>--font-mono</code> is unaffected. The alternate stacks use locally installed fonts only — no extra webfont downloads.</p>
+            <h4 class="mini">Font family preferences</h4>
+            <p>Settings → Appearance offers two font preferences, each applied by remapping a token through an <code>&lt;html&gt;</code> data attribute. <b>Font</b> (<code>data-ui-font-family</code>) remaps <code>--font-ui</code>: <b>default</b> keeps the Inter stack (<code>--font-ui-default</code>), <b>system</b> switches to <code>--font-ui-system</code>, <b>serif</b> to <code>--font-ui-serif</code>, and <b>custom</b> to <code>--font-ui-custom</code> — a font-family list built from user-typed, locally installed font names (falling back to <code>--font-ui-default</code> while empty). <b>Code font</b> (<code>data-code-font-family</code>) remaps <code>--font-mono</code> the same way: default / system (<code>--font-mono-system</code>) / custom (<code>--font-mono-custom</code>). <code>--font-display</code>, <code>--sans</code> and the legacy <code>--mono</code> alias follow automatically since they reference <code>var(--font-ui)</code> / <code>var(--font-mono)</code>. All alternate stacks use locally installed fonts only — no extra webfont downloads.</p>
 
             <h4 class="mini">Loading strategy</h4>
             <table class="dt">
@@ -290,9 +290,10 @@ onUnmounted(() => {
             <table class="dt">
               <thead><tr><th>Token</th><th>Value</th><th>Usage</th></tr></thead>
               <tbody>
-                <tr><td class="tk">--font-ui</td><td class="val">"Inter Variable", "Inter", "Helvetica Neue", Arial…</td><td>UI &amp; body (Inter first)</td></tr>
-                <tr><td class="tk">--font-ui-system / --font-ui-serif</td><td class="val">system-ui… / Charter, Georgia…</td><td>alternate UI faces applied by the font family preference</td></tr>
-                <tr><td class="tk">--font-mono</td><td class="val">JetBrains Mono…</td><td>code, tool names, line numbers, diffs</td></tr>
+                <tr><td class="tk">--font-ui</td><td class="val">var(--font-ui-default)</td><td>UI &amp; body (Inter first); remapped by the font preference</td></tr>
+                <tr><td class="tk">--font-ui-system / --font-ui-serif / --font-ui-custom</td><td class="val">system-ui… / Charter, Georgia… / user-typed</td><td>alternate UI faces applied by the font preference</td></tr>
+                <tr><td class="tk">--font-mono</td><td class="val">var(--font-mono-default)</td><td>code, tool names, line numbers, diffs; remapped by the code-font preference</td></tr>
+                <tr><td class="tk">--font-mono-system / --font-mono-custom</td><td class="val">ui-monospace… / user-typed</td><td>alternate code faces applied by the code-font preference</td></tr>
                 <tr><td class="tk">--base-ui-font-size</td><td class="val">14px user preference</td><td>root setting that drives UI, reading body, and sidebar font sizes</td></tr>
                 <tr><td class="tk">--content-font-size</td><td class="val">calc(base + 1px)</td><td>chat Markdown, message bubbles, composer</td></tr>
                 <tr><td class="tk">--leading-tight/normal/relaxed</td><td class="val">1.25 / 1.5 / 1.7</td><td>headings / UI / long text</td></tr>

@@ -10,4 +10,10 @@ export default {
   fontDefault: '默认',
   fontSystem: '系统',
   fontSerif: '衬线',
+  fontCustom: '自定义',
+  fontCustomLabel: '自定义界面字体',
+  fontCustomHint: '本机已安装的字体名称',
+  fontCustomPlaceholder: '例如 Maple Mono NF CN',
+  codeFontLabel: '代码字体',
+  codeFontCustomLabel: '自定义代码字体',
 } as const;
