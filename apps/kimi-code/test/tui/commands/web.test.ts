@@ -125,6 +125,30 @@ describe('handleWebCommand', () => {
       expect(host.stop).toHaveBeenCalledOnce();
     });
 
+    it('resolves the token after the daemon is up so first-time starts carry it', async () => {
+      // A fresh server writes `server.token` during startup; resolving any
+      // earlier (e.g. right after the confirm dialog) would miss it.
+      const callOrder: string[] = [];
+      mocks.ensureDaemon.mockImplementation(async () => {
+        callOrder.push('ensureDaemon');
+        return { origin: 'http://127.0.0.1:58627', reused: false, host: '127.0.0.1', port: 58627 };
+      });
+      mocks.tryResolveServerToken.mockImplementation(() => {
+        callOrder.push('resolveToken');
+        return 'tok-1';
+      });
+      const { host, getMountedPanel } = makeHost();
+
+      const pending = handleWebCommand(host, '--background');
+      getMountedPanel()?.handleInput('\r');
+      await pending;
+
+      expect(callOrder).toEqual(['ensureDaemon', 'resolveToken']);
+      expect(mocks.openUrl).toHaveBeenCalledWith(
+        'http://127.0.0.1:58627/sessions/ses-1#token=tok-1',
+      );
+    });
+
     it('skips the token line and fragment when no token is available', async () => {
       mocks.tryResolveServerToken.mockReturnValue(undefined);
       const { host, getMountedPanel } = makeHost();
@@ -204,6 +228,7 @@ describe('handleWebCommand', () => {
       expect(host.setExitOpenUrl).not.toHaveBeenCalled();
       expect(mocks.openUrl).not.toHaveBeenCalled();
       expect(mocks.ensureDaemon).not.toHaveBeenCalled();
+      expect(mocks.tryResolveServerToken).not.toHaveBeenCalled();
       expect(host.stop).toHaveBeenCalledOnce();
       expect(host.setExitForegroundTask).toHaveBeenCalledOnce();
 
@@ -226,6 +251,9 @@ describe('handleWebCommand', () => {
       const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
       try {
         readyHooks?.onReady?.('http://127.0.0.1:58627');
+        // The token is resolved inside the ready hook — after the server has
+        // written `server.token` on first boot — never during the TUI phase.
+        expect(mocks.tryResolveServerToken).toHaveBeenCalledOnce();
         expect(mocks.openUrl).toHaveBeenCalledWith(
           'http://127.0.0.1:58627/sessions/ses-1#token=tok-1',
         );

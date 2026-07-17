@@ -69,13 +69,6 @@ export async function handleWebCommand(host: SlashCommandHost, args: string): Pr
 
   host.showStatus('Starting Kimi server and opening web UI…');
 
-  // Resolve the persistent token so the opened browser auto-authenticates via
-  // the `#token=` fragment — matching the `kimi web` subcommand. Show the URL
-  // and token in green under the status line so they can be copied before the
-  // terminal exits. Best-effort: an older/never-started server has no token
-  // file, so we fall back to the plain URL and skip the token line.
-  const token = tryResolveServerToken(getDataDir());
-
   if (background) {
     let origin: string;
     try {
@@ -84,7 +77,11 @@ export async function handleWebCommand(host: SlashCommandHost, args: string): Pr
       host.showError(`Failed to start server: ${formatErrorMessage(error)}`);
       return;
     }
-    await openAndExit(host, sessionId, origin, token);
+    // Resolve the persistent token only after the daemon is up: a fresh server
+    // writes `server.token` on first boot, so reading it beforehand would miss
+    // first-time starts and the browser would hit the auth gate. Best-effort:
+    // fall back to the plain URL (and skip the token line) when unresolvable.
+    await openAndExit(host, sessionId, origin, tryResolveServerToken(getDataDir()));
     return;
   }
 
@@ -98,7 +95,7 @@ export async function handleWebCommand(host: SlashCommandHost, args: string): Pr
     return;
   }
   if (reusedOrigin !== undefined) {
-    await openAndExit(host, sessionId, reusedOrigin, token);
+    await openAndExit(host, sessionId, reusedOrigin, tryResolveServerToken(getDataDir()));
     return;
   }
 
@@ -112,6 +109,9 @@ export async function handleWebCommand(host: SlashCommandHost, args: string): Pr
     try {
       await startServerForeground(runOptions, {
         onReady: (origin) => {
+          // Resolve the token here (after the server is listening) for the
+          // same first-boot reason as the daemon path above.
+          const token = tryResolveServerToken(getDataDir());
           const url = webSessionUrl(origin, sessionId, token);
           process.stdout.write(
             formatReadyBanner(origin, runOptions.host, { token, foreground: true }),
