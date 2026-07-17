@@ -170,6 +170,27 @@ describe('handleWebCommand', () => {
       expect(host.setExitOpenUrl).toHaveBeenCalledWith('http://127.0.0.1:58627/sessions/ses-1');
     });
 
+    it('warns about a version mismatch when the reused daemon is from another CLI version', async () => {
+      mocks.tryResolveServerToken.mockReturnValue('tok-1');
+      mocks.ensureDaemon.mockResolvedValue({
+        origin: 'http://127.0.0.1:58627',
+        reused: true,
+        host: '127.0.0.1',
+        port: 58627,
+        hostVersion: '9.9.9-test-old',
+      });
+      const { host, getMountedPanel } = makeHost();
+
+      const pending = handleWebCommand(host, '--background');
+      getMountedPanel()?.handleInput('\r');
+      await pending;
+
+      expect(host.showStatus).toHaveBeenCalledWith(
+        expect.stringContaining('Running server is version 9.9.9-test-old'),
+        'warning',
+      );
+    });
+
     it('describes the background daemon in the confirmation step', async () => {
       const { host, getMountedPanel } = makeHost();
 
@@ -207,6 +228,31 @@ describe('handleWebCommand', () => {
       expect(host.setExitForegroundTask).not.toHaveBeenCalled();
       expect(mocks.startServerForeground).not.toHaveBeenCalled();
       expect(mocks.ensureDaemon).not.toHaveBeenCalled();
+    });
+
+    it('warns about a version mismatch when the reused server is from another CLI version', async () => {
+      mocks.tryResolveServerToken.mockReturnValue('tok-1');
+      mocks.findReusableDaemon.mockResolvedValue({
+        origin: 'http://127.0.0.1:58627',
+        reused: true,
+        host: '127.0.0.1',
+        port: 58627,
+        hostVersion: '9.9.9-test-old',
+      });
+      const { host, getMountedPanel } = makeHost();
+
+      const pending = handleWebCommand(host, '');
+      getMountedPanel()?.handleInput('\r');
+      await pending;
+
+      expect(host.showStatus).toHaveBeenCalledWith(
+        expect.stringContaining('Running server is version 9.9.9-test-old'),
+        'warning',
+      );
+      expect(mocks.openUrl).toHaveBeenCalledWith(
+        'http://127.0.0.1:58627/sessions/ses-1#token=tok-1',
+      );
+      expect(host.setExitForegroundTask).not.toHaveBeenCalled();
     });
 
     it('registers a foreground exit task that starts the server and opens the deep link', async () => {

@@ -4,6 +4,7 @@ import { splitTokenFragment } from '#/cli/sub/server/access-urls';
 import { ensureDaemon, findReusableDaemon } from '#/cli/sub/server/daemon';
 import { formatReadyBanner, startServerForeground } from '#/cli/sub/server/run';
 import { parseServerOptions, tryResolveServerToken } from '#/cli/sub/server/shared';
+import { getVersion } from '#/cli/version';
 import { darkColors } from '#/tui/theme/colors';
 import { openUrl } from '#/utils/open-url';
 import { getDataDir } from '#/utils/paths';
@@ -71,8 +72,9 @@ export async function handleWebCommand(host: SlashCommandHost, args: string): Pr
 
   if (background) {
     let origin: string;
+    let hostVersion: string | undefined;
     try {
-      ({ origin } = await ensureDaemon({}));
+      ({ origin, hostVersion } = await ensureDaemon({}));
     } catch (error) {
       host.showError(`Failed to start server: ${formatErrorMessage(error)}`);
       return;
@@ -81,21 +83,23 @@ export async function handleWebCommand(host: SlashCommandHost, args: string): Pr
     // writes `server.token` on first boot, so reading it beforehand would miss
     // first-time starts and the browser would hit the auth gate. Best-effort:
     // fall back to the plain URL (and skip the token line) when unresolvable.
+    showServerVersionHint(host, hostVersion);
     await openAndExit(host, sessionId, origin, tryResolveServerToken(getDataDir()));
     return;
   }
 
   // Foreground by default. A server that is already running can serve the web
   // UI right away — reuse it instead of failing to bind its port.
-  let reusedOrigin: string | undefined;
+  let reused: { origin: string; hostVersion?: string } | undefined;
   try {
-    reusedOrigin = (await findReusableDaemon())?.origin;
+    reused = await findReusableDaemon();
   } catch (error) {
     host.showError(`Failed to probe the running server: ${formatErrorMessage(error)}`);
     return;
   }
-  if (reusedOrigin !== undefined) {
-    await openAndExit(host, sessionId, reusedOrigin, tryResolveServerToken(getDataDir()));
+  if (reused !== undefined) {
+    showServerVersionHint(host, reused.hostVersion);
+    await openAndExit(host, sessionId, reused.origin, tryResolveServerToken(getDataDir()));
     return;
   }
 
@@ -136,6 +140,19 @@ function sessionLine(url: string): string {
   const dim = (text: string): string => chalk.hex(darkColors.textDim)(text);
   const [base, frag] = splitTokenFragment(url);
   return `${label('Session:  ')}${accent(base)}${frag === '' ? '' : dim(frag)}`;
+}
+
+/**
+ * Warn when the reused server was started by a different CLI version: it keeps
+ * serving its own bundled web UI/API until restarted. Mirrors the banner hint
+ * printed by `kimi web`.
+ */
+function showServerVersionHint(host: SlashCommandHost, hostVersion: string | undefined): void {
+  if (hostVersion === undefined || hostVersion === getVersion()) return;
+  host.showStatus(
+    `Running server is version ${hostVersion}, this CLI is ${getVersion()} — restart with kimi server kill to pick up the new version.`,
+    'warning',
+  );
 }
 
 /**

@@ -205,6 +205,8 @@ Opens Kimi's graphical session in the browser as an alternative to the terminal 
 
 `kimi web` runs a local Kimi server in the foreground — the command stays attached to the terminal and the server stops when you press `Ctrl-C` — and opens the web UI in the default browser once the server is healthy. If a server is already running, it is reused: the command prints its address, opens the browser, and returns instead of binding a new port. Pass `--background` to start a background daemon and release the terminal immediately; the daemon shuts itself down after the last web client disconnects.
 
+The reused server keeps running whatever version started it — after an upgrade, an older server is reused as-is and the output points out the version mismatch. Run `kimi server kill` once after upgrading to restart on the new version.
+
 ```sh
 kimi web                 # run the server in the foreground and open the browser (reuses a running one)
 kimi web --background    # start a background daemon, open the browser, and release the terminal

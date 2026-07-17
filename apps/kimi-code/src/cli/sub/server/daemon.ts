@@ -77,6 +77,12 @@ export interface EnsureDaemonResult {
   readonly host: string;
   /** Port the running daemon is actually listening on (from the lock). */
   readonly port: number;
+  /**
+   * CLI version that started the reused server, recorded in its lock. Absent
+   * for freshly-spawned servers (same version as this CLI) and for locks
+   * written by older builds.
+   */
+  readonly hostVersion?: string;
 }
 
 /** Path of the daemon log file (shared with the OS-service log location). */
@@ -311,6 +317,7 @@ export async function findReusableDaemon(): Promise<EnsureDaemonResult | undefin
     reused: true,
     host: existing.host ?? DEFAULT_SERVER_HOST,
     port: existing.port,
+    hostVersion: existing.host_version,
   };
 }
 

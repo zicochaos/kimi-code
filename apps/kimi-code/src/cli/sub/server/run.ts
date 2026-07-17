@@ -92,6 +92,8 @@ export interface RunCommandDeps {
     host?: string;
     /** Port the running daemon is actually listening on (from the lock). */
     port?: number;
+    /** CLI version that started the reused server (from its lock), if recorded. */
+    hostVersion?: string;
   }>;
   /** Foreground runner; defaults to the real in-process runner when omitted. */
   startServerForeground?: (
@@ -258,7 +260,12 @@ export async function handleRunCommand(
   // the plain origin / no token line when unavailable. When auth is bypassed,
   // the token is meaningless and is intentionally NOT shown or carried in the
   // opened URL.
-  const writeReady = (result: { origin: string; reused?: boolean; host?: string }): void => {
+  const writeReady = (result: {
+    origin: string;
+    reused?: boolean;
+    host?: string;
+    hostVersion?: string;
+  }): void => {
     const { origin } = result;
     const host = result.host ?? parsed.host;
     // When a daemon is reused, this command's flags were NOT applied to the
@@ -278,6 +285,11 @@ export async function handleRunCommand(
       // not start a new one. Say so loudly, then print the actual running
       // server's URLs (using its real bind host, not the requested one).
       output += formatReuseNotice(origin);
+      // The reused server may predate an upgrade of this CLI: it keeps
+      // serving its own bundled web UI / API, so surface the mismatch.
+      if (result.hostVersion !== undefined && result.hostVersion !== getVersion()) {
+        output += formatServerUpgradeNotice(result.hostVersion);
+      }
     }
     output +=
       parsed.logLevel === DEFAULT_FOREGROUND_LOG_LEVEL
@@ -301,7 +313,12 @@ export async function handleRunCommand(
       const probe = deps.findReusableDaemon ?? findReusableDaemon;
       const existing = await probe();
       if (existing !== undefined) {
-        writeReady({ origin: existing.origin, reused: true, host: existing.host });
+        writeReady({
+          origin: existing.origin,
+          reused: true,
+          host: existing.host,
+          hostVersion: existing.hostVersion,
+        });
         return;
       }
     }
@@ -322,6 +339,18 @@ function formatReuseNotice(origin: string): string {
     `${chalk.hex(darkColors.warning)('A server is already running')} at ${origin} — ` +
     `the options from this command were not applied. ` +
     `Run ${chalk.bold('kimi server kill')} first to bind a new host/port.\n`
+  );
+}
+
+/**
+ * Shown after the reuse notice when the running server was started by a
+ * different CLI version: it keeps serving its own bundled web UI/API, so the
+ * user may want to restart it onto the version they just installed.
+ */
+function formatServerUpgradeNotice(runningVersion: string): string {
+  return (
+    `${chalk.hex(darkColors.warning)('Server version mismatch')}: the running server is ` +
+    `${runningVersion}, this CLI is ${getVersion()} — restarting picks up the new version.\n`
   );
 }
 

@@ -507,6 +507,70 @@ describe('`kimi server run` background start', () => {
     expect(stdout).toContain(color.hex(darkColors.textMuted)('off'));
   });
 
+  it('warns when the reused daemon was started by a different CLI version', async () => {
+    const { handleRunCommand } = await import('#/cli/sub/server/run');
+    const { getVersion } = await import('#/cli/version');
+    let stdout = '';
+
+    await handleRunCommand(
+      { port: '58627' },
+      {
+        startServerBackground: async () => ({
+          origin: 'http://127.0.0.1:58627',
+          reused: true,
+          host: '127.0.0.1',
+          port: 58627,
+          hostVersion: '0.0.0-test-old',
+        }),
+        openUrl: vi.fn(),
+        stdout: {
+          write(chunk: string | Uint8Array) {
+            stdout += String(chunk);
+            return true;
+          },
+        },
+        stderr: { write: () => true },
+      },
+    );
+
+    const plain = stripAnsi(stdout);
+    expect(plain).toContain('A server is already running');
+    expect(plain).toContain('Server version mismatch');
+    expect(plain).toContain('0.0.0-test-old');
+    expect(plain).toContain(getVersion());
+  });
+
+  it('stays quiet when the reused daemon runs the same CLI version', async () => {
+    const { handleRunCommand } = await import('#/cli/sub/server/run');
+    const { getVersion } = await import('#/cli/version');
+    let stdout = '';
+
+    await handleRunCommand(
+      { port: '58627' },
+      {
+        startServerBackground: async () => ({
+          origin: 'http://127.0.0.1:58627',
+          reused: true,
+          host: '127.0.0.1',
+          port: 58627,
+          hostVersion: getVersion(),
+        }),
+        openUrl: vi.fn(),
+        stdout: {
+          write(chunk: string | Uint8Array) {
+            stdout += String(chunk);
+            return true;
+          },
+        },
+        stderr: { write: () => true },
+      },
+    );
+
+    const plain = stripAnsi(stdout);
+    expect(plain).toContain('A server is already running');
+    expect(plain).not.toContain('Server version mismatch');
+  });
+
   it('prints a red danger notice and suppresses the token when auth is bypassed', async () => {
     const { handleRunCommand } = await import('#/cli/sub/server/run');
     let stdout = '';
@@ -1564,6 +1628,41 @@ describe('kimi web (foreground default)', () => {
     // stays `kimi server kill`, not Ctrl+C.
     expect(plain).toContain('Stop:');
     expect(plain).toContain('kimi server kill');
+    // No hostVersion recorded/attached → no version mismatch line.
+    expect(plain).not.toContain('Server version mismatch');
+  });
+
+  it('hints at a version mismatch when reusing a server from another CLI version', async () => {
+    const { handleRunCommand } = await import('#/cli/sub/server/run');
+    let stdout = '';
+
+    await handleRunCommand(
+      { port: '58627' },
+      {
+        startServerBackground: vi.fn(async () => ({ origin: 'http://127.0.0.1:58627' })),
+        startServerForeground: vi.fn(),
+        findReusableDaemon: async () => ({
+          origin: 'http://127.0.0.1:58627',
+          reused: true,
+          host: '127.0.0.1',
+          port: 58627,
+          hostVersion: '0.0.0-test-old',
+        }),
+        openUrl: vi.fn(),
+        stdout: {
+          write(chunk: string | Uint8Array) {
+            stdout += String(chunk);
+            return true;
+          },
+        },
+        stderr: { write: () => true },
+      },
+      { defaultForeground: true },
+    );
+
+    const plain = stripAnsi(stdout);
+    expect(plain).toContain('Server version mismatch');
+    expect(plain).toContain('0.0.0-test-old');
   });
 
   it('`server run --foreground` never probes for a reusable daemon', async () => {
