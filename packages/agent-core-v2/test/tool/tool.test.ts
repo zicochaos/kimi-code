@@ -1873,15 +1873,15 @@ describe('AgentSwarmToolInputSchema', () => {
     ).toBe(true);
   });
 
-  it('exposes subagent_type and resume_agent_ids parameters', () => {
+  it('exposes model, subagent_type, and resume_agent_ids parameters', () => {
     const properties = agentSwarmSchemaProperties<{ description?: string }>();
 
+    expect(properties['model']?.description).toContain('Configured model alias');
     expect(properties['subagent_type']?.description).toContain('defaults to coder');
     expect(properties['resume_agent_ids']?.description).toContain('Map of existing subagent');
     expect(Object.keys(properties).at(-1)).toBe('resume_agent_ids');
     expect(properties).not.toHaveProperty('run_in_background');
     expect(properties).not.toHaveProperty('timeout');
-    expect(properties).not.toHaveProperty('model');
   });
 });
 
@@ -1930,6 +1930,7 @@ describe('AgentSwarm tool execution contract', () => {
       async (
         args: SessionSwarmRunArgs<unknown>,
       ): Promise<readonly SessionSwarmRunResult<unknown>[]> => {
+        args.onValidated?.();
         return args.tasks.map((task, index) => ({
           task,
           agentId: `agent-explore-${String(index + 1)}`,
@@ -1960,6 +1961,7 @@ describe('AgentSwarm tool execution contract', () => {
 
     expect(runSwarm).toHaveBeenCalledWith({
       callerAgentId: 'main',
+      onValidated: expect.any(Function),
       tasks: [
         {
           kind: 'spawn',
@@ -1968,6 +1970,7 @@ describe('AgentSwarm tool execution contract', () => {
           parentToolCallId: 'call_swarm',
           prompt: 'Review src/a.ts',
           description: 'Review files #1 (explore)',
+          modelAlias: 'mock-model',
           swarmIndex: 1,
           swarmItem: 'src/a.ts',
           runInBackground: false,
@@ -1981,6 +1984,7 @@ describe('AgentSwarm tool execution contract', () => {
           parentToolCallId: 'call_swarm',
           prompt: 'Review src/b.ts',
           description: 'Review files #2 (explore)',
+          modelAlias: 'mock-model',
           swarmIndex: 2,
           swarmItem: 'src/b.ts',
           runInBackground: false,
@@ -2011,6 +2015,7 @@ describe('AgentSwarm tool execution contract', () => {
       async (
         args: SessionSwarmRunArgs<unknown>,
       ): Promise<readonly SessionSwarmRunResult<unknown>[]> => {
+        args.onValidated?.();
         return args.tasks.map((task, index) => ({
           task,
           agentId: task.kind === 'resume' ? task.resumeAgentId : `agent-new-${String(index + 1)}`,
@@ -2053,6 +2058,7 @@ describe('AgentSwarm tool execution contract', () => {
     });
     expect(runSwarm).toHaveBeenCalledWith({
       callerAgentId: 'main',
+      onValidated: expect.any(Function),
       tasks: [
         {
           kind: 'resume',
@@ -2067,6 +2073,7 @@ describe('AgentSwarm tool execution contract', () => {
           parentToolCallId: 'call_swarm',
           prompt: 'Continue previous review A',
           description: 'Finish review #1 (resume)',
+          modelAlias: 'mock-model',
           swarmIndex: 1,
           swarmItem: 'src/old-a.ts',
           runInBackground: false,
@@ -2087,6 +2094,7 @@ describe('AgentSwarm tool execution contract', () => {
           parentToolCallId: 'call_swarm',
           prompt: 'Continue previous review B',
           description: 'Finish review #2 (resume)',
+          modelAlias: 'mock-model',
           swarmIndex: 2,
           swarmItem: 'src/old-b.ts',
           runInBackground: false,
@@ -2106,6 +2114,7 @@ describe('AgentSwarm tool execution contract', () => {
           parentToolCallId: 'call_swarm',
           prompt: 'Review src/new.ts',
           description: 'Finish review #3 (explore)',
+          modelAlias: 'mock-model',
           swarmIndex: 3,
           swarmItem: 'src/new.ts',
           runInBackground: false,
