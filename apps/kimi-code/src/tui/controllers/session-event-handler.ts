@@ -358,6 +358,7 @@ export class SessionEventHandler {
     this.host.streamingUI.setStep(event.step);
     this.host.streamingUI.resetToolUi();
     this.host.streamingUI.finalizeLiveTextBuffers('waiting');
+    this.host.streamingUI.clearStepArtifactScope();
     this.host.patchLivePane({
       mode: 'waiting',
       pendingApproval: null,
@@ -370,13 +371,14 @@ export class SessionEventHandler {
   }
 
   private handleStepRetrying(event: TurnStepRetryingEvent): void {
-    // The failed attempt's partial live output is invalid — the next attempt
-    // re-streams from scratch. Mirror print mode's discardAssistant()
-    // (cli/run-prompt.ts:578) instead of committing it to the transcript. The
-    // TUI renders assistant text live, so discarding also means pulling the
-    // already-rendered partial block, not just clearing the buffers.
+    // The failed attempt's output is invalid — the next attempt re-streams the
+    // step from scratch. Mirror print mode's discardAssistant()
+    // (cli/run-prompt.ts:578) instead of committing it: the TUI renders
+    // live, so discarding means pulling every already-mounted artifact of the
+    // attempt (assistant blocks, thinking, tool previews), not just clearing
+    // buffers.
     this.host.streamingUI.discardPending();
-    this.host.streamingUI.discardStreamingBlock();
+    this.host.streamingUI.discardStepArtifacts();
     this.host.streamingUI.resetLiveText();
     this.host.streamingUI.resetToolUi();
     this.host.patchLivePane({ mode: 'waiting', pendingApproval: null, pendingQuestion: null });
@@ -387,6 +389,7 @@ export class SessionEventHandler {
     if (this.host.state.appState.streamingPhase === 'retrying') {
       this.host.setAppState({ streamingPhase: 'waiting' });
     }
+    this.host.streamingUI.clearStepArtifactScope();
     this.host.streamingUI.flushNow();
     this.maybeShowDebugTiming(event);
 
