@@ -37,9 +37,11 @@ import type { EnabledPluginSessionStart, PluginCommandDef } from '../plugin';
 import {
   DEFAULT_AGENT_PROFILES,
   DEFAULT_INIT_PROMPT,
+  getWorktreeInfoFromSessionMetadata,
   loadAgentsMd,
   prepareSystemPromptContext,
   type ResolvedAgentProfile,
+  type WorktreeInfo,
 } from '../profile';
 import type { ProviderManager } from './provider-manager';
 import {
@@ -661,6 +663,15 @@ export class Session {
   }
 
   /**
+   * Returns the git worktree metadata stored on the session, if any.
+   *
+   * Populated when the session was launched with `--worktree`.
+   */
+  getWorktreeInfo(): WorktreeInfo | undefined {
+    return getWorktreeInfoFromSessionMetadata(this.metadata);
+  }
+
+  /**
    * Applies a profile's derived config — cwd, system prompt, active tools — to
    * an agent. Fresh creation and resume-of-an-incomplete-wire both route
    * through here so the two paths cannot drift apart.
@@ -674,7 +685,11 @@ export class Session {
       this.options.kimiHomeDir,
       { additionalDirs: this.additionalDirs },
     );
-    agent.useProfile(profile, context, this.options.kimiHomeDir);
+    agent.useProfile(
+      profile,
+      { ...context, worktreeInfo: this.getWorktreeInfo() },
+      this.options.kimiHomeDir,
+    );
     const { agentsMdWarning } = context;
     if (agentsMdWarning !== undefined) {
       this.agentsMdWarning = agentsMdWarning;
