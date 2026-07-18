@@ -517,7 +517,8 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     return this.finishReadResult({
       renderedLines,
       truncatedLineNumbers,
-      maxLinesReached: effectiveLimit >= MAX_LINES && entries.length >= effectiveLimit,
+      maxLinesReached:
+        input.effectiveLimit >= MAX_LINES && input.entries.length >= input.effectiveLimit,
       maxBytesReached,
       lineEndingStyle,
       startLine: renderedCandidates[0]?.entry.lineNo ?? 0,
