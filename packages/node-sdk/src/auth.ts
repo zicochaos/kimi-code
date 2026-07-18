@@ -5,6 +5,7 @@ import {
   writeConfigFile,
   type KimiConfig,
   type OAuthRef,
+  type ProviderConfig,
 } from '@moonshot-ai/agent-core';
 import {
   applyManagedKimiCodeConfig,
@@ -119,7 +120,26 @@ export class KimiAuthFacade {
   }
 
   async status(providerName?: string | undefined): Promise<AuthStatus> {
-    return this.toolkit.status(providerName, this.resolveRuntimeManagedAuth(providerName).oauthRef);
+    const status = await this.toolkit.status(
+      providerName,
+      this.resolveRuntimeManagedAuth(providerName).oauthRef,
+    );
+    const config = loadRuntimeConfigSafe(this.options.configPath).config;
+    const apiKeyProviderNames = new Set(
+      Object.entries(config.providers)
+        .filter(([, provider]) => hasConfiguredApiKey(provider))
+        .map(([name]) => name),
+    );
+    const providers = status.providers.map((entry) => {
+      const hasApiKey = apiKeyProviderNames.delete(entry.providerName);
+      return { ...entry, hasToken: entry.hasToken || hasApiKey };
+    });
+    if (providerName !== undefined || apiKeyProviderNames.size === 0) return { providers };
+
+    for (const providerName of apiKeyProviderNames) {
+      providers.push({ providerName, hasToken: true });
+    }
+    return { providers };
   }
 
   async login(
@@ -316,4 +336,29 @@ export class KimiAuthFacade {
       configuredOAuthRef: oauthRef ?? auth.oauthRef,
     }).oauthRef;
   }
+}
+
+function hasConfiguredApiKey(provider: ProviderConfig): boolean {
+  if (nonEmpty(provider.apiKey)) return true;
+
+  switch (provider.type) {
+    case 'anthropic':
+      return nonEmpty(provider.env?.['ANTHROPIC_API_KEY']);
+    case 'openai':
+    case 'openai_responses':
+      return nonEmpty(provider.env?.['OPENAI_API_KEY']);
+    case 'kimi':
+      return nonEmpty(provider.env?.['KIMI_API_KEY']);
+    case 'google-genai':
+      return nonEmpty(provider.env?.['GOOGLE_API_KEY']);
+    case 'vertexai':
+      return (
+        nonEmpty(provider.env?.['VERTEXAI_API_KEY']) ||
+        nonEmpty(provider.env?.['GOOGLE_API_KEY'])
+      );
+  }
+}
+
+function nonEmpty(value: string | undefined): boolean {
+  return (value?.trim().length ?? 0) > 0;
 }
