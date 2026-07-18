@@ -25,6 +25,18 @@ export interface BannerState {
   ttlHours?: number;
 }
 
+export interface RetryStatus {
+  readonly failedAttempt: number;
+  readonly nextAttempt: number;
+  readonly maxAttempts: number;
+  readonly delayMs: number;
+  /** Epoch ms when the backoff sleep ends (Date.now() + delayMs at event receipt). */
+  readonly nextRetryAt: number;
+  readonly errorName: string;
+  readonly errorMessage: string;
+  readonly statusCode?: number;
+}
+
 export interface AppState {
   model: string;
   workDir: string;
@@ -44,7 +56,7 @@ export interface AppState {
   maxContextTokens: number;
   isCompacting: boolean;
   isReplaying: boolean;
-  streamingPhase: 'idle' | 'waiting' | 'thinking' | 'composing' | 'shell';
+  streamingPhase: 'idle' | 'waiting' | 'thinking' | 'composing' | 'shell' | 'retrying';
   streamingStartTime: number;
   theme: ThemeName;
   version: string;
@@ -58,6 +70,8 @@ export interface AppState {
   sessionTitle: string | null;
   /** Current goal snapshot for the footer badge; null/undefined when no active goal. */
   goal?: GoalSnapshot | null;
+  /** Live retry backoff status; null/undefined when the current step is not retrying. */
+  retryStatus?: RetryStatus | null;
   mcpServersSummary: string | null;
   /** Optional banner shown below the welcome panel; null means no banner to render. */
   banner?: BannerState | null;
