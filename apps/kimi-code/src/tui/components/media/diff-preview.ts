@@ -20,7 +20,7 @@ interface DiffStyles {
   meta: (s: string) => string;
 }
 
-function makeDiffStyles(): DiffStyles {
+export function makeDiffStyles(): DiffStyles {
   const palette = currentTheme.palette;
   return {
     addLine: (s) => chalk.hex(palette.diffAdded).bgHex(palette.diffAddedBg)(s),
