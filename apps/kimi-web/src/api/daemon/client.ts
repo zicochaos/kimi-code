@@ -7,11 +7,12 @@ import { traceKeyEvent } from '../../debug/trace';
 import type {
   AppConfig,
   AppGoal,
-  AppManagedUsageResult,
+  AppManagedUsage,
   AppMessage,
   AppMessageRole,
   AppModel,
   AppProvider,
+  AppUsageRow,
   ProviderRefreshResult,
   AppSession,
   AppSkill,
@@ -36,7 +37,8 @@ import type {
   QuestionResponse,
 } from '../types';
 import { createAgentProjector } from './agentEventProjector';
-import { DaemonHttpClient } from './http';
+import { DaemonHttpClient, SERVER_AUTH_UNAUTHORIZED_CODE } from './http';
+import { DaemonApiError } from '../errors';
 import {
   toAppApprovalRequest,
   toAppConfig,
@@ -84,7 +86,8 @@ import type {
   WireSessionSnapshot,
   WireWorkspace,
   WireLogoutResult,
-  WireManagedUsageResult,
+  WireManagedUsage,
+  WireUsageRow,
 } from './wire';
 import { DaemonEventSocket } from './ws';
 
@@ -1361,12 +1364,56 @@ export class DaemonKimiWebApi implements KimiWebApi {
     return { loggedOut: data.logged_out };
   }
 
-  async getManagedUsage(): Promise<AppManagedUsageResult> {
-    const data = await this.http.get<WireManagedUsageResult>('/usages');
-    if (data.kind === 'error') {
-      return { kind: 'error', summary: null, limits: [], message: data.message };
+  async getManagedUsage(): Promise<AppManagedUsage> {
+    let data: WireManagedUsage;
+    try {
+      data = await this.http.get<WireManagedUsage>('/oauth/usage');
+    } catch (error) {
+      // Degraded results keep the panel renderable: 404 = old backend without
+      // the route; server-auth 401 = re-login required; anything else is a
+      // plain fetch failure. Server-auth 401 also trips the global auth gate
+      // via the http layer, so the panel copy is mostly a fallback there.
+      if (error instanceof DaemonApiError) {
+        if (error.code === 404) {
+          return { kind: 'error', code: 'route_unavailable', message: error.message };
+        }
+        if (error.code === SERVER_AUTH_UNAUTHORIZED_CODE || error.code === 401) {
+          return { kind: 'error', code: 'unauthenticated', message: error.message };
+        }
+      }
+      return {
+        kind: 'error',
+        code: 'unavailable',
+        message: error instanceof Error ? error.message : String(error),
+      };
     }
-    return { kind: 'ok', summary: data.summary, limits: data.limits };
+    if (data.kind === 'error') {
+      return { kind: 'error', code: data.code, message: data.message };
+    }
+    const row = (r: WireUsageRow): AppUsageRow => ({
+      label: r.label,
+      used: r.used,
+      limit: r.limit,
+      resetHint: r.reset_hint,
+      resetAt: r.reset_at,
+      windowSeconds: r.window_seconds,
+    });
+    return {
+      kind: 'ok',
+      summary: data.summary === null ? null : row(data.summary),
+      limits: data.limits.map(row),
+      extraUsage:
+        data.extra_usage === null
+          ? null
+          : {
+              balanceCents: data.extra_usage.balance_cents,
+              totalCents: data.extra_usage.total_cents,
+              monthlyChargeLimitEnabled: data.extra_usage.monthly_charge_limit_enabled,
+              monthlyChargeLimitCents: data.extra_usage.monthly_charge_limit_cents,
+              monthlyUsedCents: data.extra_usage.monthly_used_cents,
+              currency: data.extra_usage.currency,
+            },
+    };
   }
 
   // -------------------------------------------------------------------------

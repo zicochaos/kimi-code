@@ -8,17 +8,17 @@
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getKimiWebApi } from '../api';
-import type { AppManagedUsageResult, AppManagedUsageRow } from '../api/types';
+import type { AppManagedUsage, AppUsageRow } from '../api/types';
 
 const { t } = useI18n();
 
-const result = ref<AppManagedUsageResult | null>(null);
+const result = ref<AppManagedUsage | null>(null);
 const loading = ref(false);
 const failed = ref(false);
 
 type Severity = 'ok' | 'warn' | 'danger';
 
-function severityOf(row: AppManagedUsageRow): Severity {
+function severityOf(row: AppUsageRow): Severity {
   if (row.limit <= 0) return 'ok';
   const ratio = row.used / row.limit;
   if (ratio >= 0.85) return 'danger';
@@ -26,7 +26,7 @@ function severityOf(row: AppManagedUsageRow): Severity {
   return 'ok';
 }
 
-function pctOf(row: AppManagedUsageRow): number {
+function pctOf(row: AppUsageRow): number {
   if (row.limit <= 0) return 0;
   return Math.min(100, Math.max(0, Math.ceil((row.used / row.limit) * 100)));
 }
@@ -36,10 +36,10 @@ function shortLabel(label: string): string {
 }
 
 // Weekly summary first (1w), then each window limit (incl. 5h) in arrival order.
-const rows = computed<AppManagedUsageRow[]>(() => {
+const rows = computed<AppUsageRow[]>(() => {
   const r = result.value;
   if (r === null || r.kind !== 'ok') return [];
-  const out: AppManagedUsageRow[] = [];
+  const out: AppUsageRow[] = [];
   if (r.summary !== null) out.push(r.summary);
   out.push(...r.limits);
   return out;
@@ -47,7 +47,7 @@ const rows = computed<AppManagedUsageRow[]>(() => {
 
 const visible = computed(() => rows.value.length > 0 || failed.value);
 const errorMessage = computed(() =>
-  result.value?.kind === 'error' ? (result.value.message ?? t('status.quotaUnavailable')) : '',
+  result.value?.kind === 'error' ? (result.value.message || t('status.quotaUnavailable')) : '',
 );
 
 async function refresh(): Promise<void> {
