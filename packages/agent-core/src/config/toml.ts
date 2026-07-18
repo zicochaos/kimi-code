@@ -490,6 +490,7 @@ export function configToTomlData(config: KimiConfig): Record<string, unknown> {
     'defaultPlanMode',
     'mergeAllAvailableSkills',
     'extraSkillDirs',
+    'disabledSkills',
     'telemetry',
   ];
   for (const key of scalarFields) {
