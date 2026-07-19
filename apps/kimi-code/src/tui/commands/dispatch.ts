@@ -19,7 +19,6 @@ import type {
   TranscriptEntry,
 } from '../types';
 import { formatErrorMessage } from '../utils/event-payload';
-import { handleAgentsCommand } from './agents';
 import { handleLoginCommand, handleLogoutCommand } from './auth';
 import { handleBtwCommand } from './btw';
 import { handleCopyCommand } from './copy';
@@ -40,7 +39,6 @@ import {
 import { handleGoalCommand } from './goal';
 import { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } from './info';
 import { handleAddDirCommand } from './add-dir';
-import { handleDiffCommand } from './diff';
 import { parseSlashInput } from './parse';
 import { handlePluginsCommand } from './plugins';
 import { handleProviderCommand } from './provider';
@@ -63,7 +61,6 @@ import { handleWebCommand } from './web';
 // ---------------------------------------------------------------------------
 
 export { handleLoginCommand, handleLogoutCommand } from './auth';
-export { handleAgentsCommand } from './agents';
 export { handleBtwCommand } from './btw';
 export { handleCopyCommand } from './copy';
 export { handleAddDirCommand } from './add-dir';
@@ -143,8 +140,8 @@ export interface SlashCommandHost {
   /**
    * Register a task that takes over the process after the TUI has shut down
    * (instead of exiting): the runner awaits it and only exits when it returns.
-   * Used by `/web` foreground mode to keep the server attached to this
-   * terminal until Ctrl+C.
+   * Used by `/web` to keep a freshly started server attached to this terminal
+   * until Ctrl+C.
    */
   setExitForegroundTask(task: (exitCode: number) => Promise<void>): void;
   showHelpPanel(): void;
@@ -279,9 +276,6 @@ async function handleBuiltInSlashCommand(
     case 'tasks':
       void host.tasksBrowserController.show();
       return;
-    case 'agents':
-      await handleAgentsCommand(host, args);
-      return;
     case 'mcp':
       void showMcpServers(host);
       return;
@@ -290,9 +284,6 @@ async function handleBuiltInSlashCommand(
       return;
     case 'add-dir':
       await handleAddDirCommand(host, args);
-      return;
-    case 'diff':
-      await handleDiffCommand(host, args);
       return;
     case 'experiments':
       await showExperimentsPanel(host);
@@ -382,7 +373,7 @@ async function handleBuiltInSlashCommand(
       await handleUndoCommand(host, args);
       return;
     case 'web':
-      await handleWebCommand(host, args);
+      await handleWebCommand(host);
       return;
     default:
       host.showError(`Unknown slash command: /${String(name)}`);

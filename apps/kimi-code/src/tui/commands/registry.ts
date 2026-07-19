@@ -213,13 +213,6 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
-    name: 'diff',
-    aliases: [],
-    description: 'View uncommitted changes and per-turn diffs',
-    priority: 70,
-    availability: 'idle-only',
-  },
-  {
     name: 'new',
     aliases: ['clear'],
     description: 'Start a fresh session in the current workspace',
@@ -237,14 +230,6 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: 'Browse background tasks',
     priority: 80,
     availability: 'always',
-  },
-  {
-    name: 'agents',
-    aliases: ['agent'],
-    description: 'Show background subagent status',
-    priority: 80,
-    availability: 'always',
-    argumentHint: '[status]',
   },
   {
     name: 'mcp',
@@ -409,7 +394,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'web',
     aliases: [],
     description:
-      'Open the current session in the Web UI (server runs in the foreground; --background to daemonize)',
+      'Open the current session in the Web UI — pick a running server or start a new one',
     priority: 40,
     availability: 'always',
   },

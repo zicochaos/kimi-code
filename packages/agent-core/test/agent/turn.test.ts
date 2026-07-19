@@ -520,11 +520,11 @@ describe('Agent turn flow', () => {
 
     expect(records).toContainEqual({
       event: 'turn_started',
-      properties: { turn_id: 0, mode: 'agent' },
+      properties: { turn_id: 0, mode: 'agent', thinking_effort: 'off' },
     });
     expect(records).toContainEqual({
       event: 'turn_interrupted',
-      properties: { turn_id: 0, mode: 'agent', at_step: 0, interrupt_reason: 'error' },
+      properties: { turn_id: 0, mode: 'agent', thinking_effort: 'off', at_step: 0, interrupt_reason: 'error' },
     });
   });
 
@@ -650,7 +650,7 @@ describe('Agent turn flow', () => {
     const started = records.find((candidate) => candidate.event === 'turn_started');
     expect(started).toEqual({
       event: 'turn_started',
-      properties: expect.objectContaining({ mode: 'agent', provider_type: 'kimi', protocol: 'kimi' }),
+      properties: expect.objectContaining({ mode: 'agent', provider_type: 'kimi', protocol: 'kimi', thinking_effort: 'off' }),
     });
 
     const ended = records.find((candidate) => candidate.event === 'turn_ended');
@@ -662,6 +662,7 @@ describe('Agent turn flow', () => {
         reason: 'completed',
         provider_type: 'kimi',
         protocol: 'kimi',
+        thinking_effort: 'off',
         duration_ms: expect.any(Number),
       }),
     });
