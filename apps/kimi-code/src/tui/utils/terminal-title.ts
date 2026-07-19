@@ -1,7 +1,7 @@
 import { homedir, hostname as osHostname } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g;
+const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F-\u009F]/g;
 
 interface TerminalTitleOptions {
   readonly hostname?: string;

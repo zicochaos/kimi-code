@@ -39,7 +39,7 @@ describe('formatTerminalTitle', () => {
 
   it('removes control characters from the OSC payload', () => {
     expect(
-      formatTerminalTitle(join(homeDir, 'Projects', '\u001bsample'), {
+      formatTerminalTitle(join(homeDir, 'Projects', '\u001Bsample'), {
         hostname: 'work\u0007station.example.test',
         homeDir,
       }),
