@@ -52,6 +52,7 @@ import {
 } from '#/tui/commands/prompts';
 import type { QueuedMessage } from '#/tui/types';
 import type { ImageAttachmentStore } from '#/tui/utils/image-attachment-store';
+import { formatTerminalTitle } from '#/tui/utils/terminal-title';
 
 vi.mock('#/tui/commands/prompts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('#/tui/commands/prompts')>();
@@ -5053,7 +5054,8 @@ command = "vim"
         () => {},
       );
 
-      expect(setTitle).toHaveBeenCalledWith('Implement terminal title');
+      expect(setTitle).toHaveBeenCalledWith(formatTerminalTitle(driver.state.appState.workDir));
+      expect(setTitle).not.toHaveBeenCalledWith('Implement terminal title');
       expect(process.title).toBe('kimi-test-runner');
     } finally {
       process.title = originalTitle;
@@ -5085,7 +5087,8 @@ command = "vim"
         });
         expect(driver.getCurrentSessionId()).toBe('ses-fork');
       });
-      expect(setTitle).toHaveBeenCalledWith('Fork: Source title');
+      expect(setTitle).toHaveBeenCalledWith(formatTerminalTitle(driver.state.appState.workDir));
+      expect(setTitle).not.toHaveBeenCalledWith('Fork: Source title');
       expect(process.title).toBe('kimi-test-runner');
       expect(source.close).toHaveBeenCalledOnce();
       expect(forked.onEvent).toHaveBeenCalledOnce();
