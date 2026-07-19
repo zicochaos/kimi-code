@@ -120,6 +120,25 @@ describe('events / display re-exports', () => {
     expect((parsed as { status: string }).status).toBe('blocked');
   });
 
+  it('validates subagent.spawned events with and without model', () => {
+    const base = {
+      type: 'subagent.spawned',
+      agentId: 'main',
+      sessionId: 'sess_1',
+      subagentId: 'agent_child',
+      subagentName: 'explore',
+      parentToolCallId: 'call_agent',
+      runInBackground: false,
+    };
+
+    const withoutModel = eventSchema.parse(base);
+    expect(withoutModel.type).toBe('subagent.spawned');
+    expect((withoutModel as { model?: string }).model).toBeUndefined();
+
+    const withModel = eventSchema.parse({ ...base, model: 'local/gpt-5.6-sol' });
+    expect((withModel as { model?: string }).model).toBe('local/gpt-5.6-sol');
+  });
+
   it('preserves detached on task events', () => {
     const parsed = eventSchema.parse({
       type: 'task.started',

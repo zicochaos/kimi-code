@@ -1033,6 +1033,59 @@ describe('ToolCallComponent', () => {
     expect(out).not.toContain('summary fallback');
   });
 
+  it('shows the subagent model in the header when spawned with a model', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const component = new ToolCallComponent(
+      {
+        id: 'call_agent_model',
+        name: 'Agent',
+        args: { description: 'explore project xxx' },
+      },
+      undefined,
+    );
+
+    component.onSubagentSpawned({
+      agentId: 'sub_explore_model',
+      agentName: 'explore',
+      runInBackground: false,
+      model: 'local/gpt-5.6-sol',
+    });
+
+    component.onSubagentStarted({
+      agentId: 'sub_explore_model',
+      agentName: 'explore',
+      runInBackground: false,
+      model: 'local/gpt-5.6-sol',
+    });
+
+    const out = strip(component.render(120).join('\n'));
+    expect(out).toContain('Explore Agent Running (explore project xxx) · local/gpt-5.6-sol · 0 tools · 0s');
+  });
+
+  it('omits the model chip when the subagent has no model', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const component = new ToolCallComponent(
+      {
+        id: 'call_agent_no_model',
+        name: 'Agent',
+        args: { description: 'explore project xxx' },
+      },
+      undefined,
+    );
+
+    component.onSubagentSpawned({
+      agentId: 'sub_explore_no_model',
+      agentName: 'explore',
+      runInBackground: false,
+    });
+
+    const out = strip(component.render(120).join('\n'));
+    expect(out).not.toContain('local/');
+    expect(out).toContain('Explore Agent Queued (explore project xxx) · 0 tools · 0s');
+  });
+
   it('shows Backgrounded after a foreground subagent is detached, even after setResult', () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);

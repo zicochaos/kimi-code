@@ -216,6 +216,28 @@ describe('AgentGroupComponent', () => {
     running.dispose();
   });
 
+  it('shows each agent model in its row when spawned with a model', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const ui = stubTui();
+    const group = new AgentGroupComponent(ui);
+    const explore = createAgent('call_agent_1', 'inspect project', 'explore', ui);
+    explore.onSubagentSpawned({
+      agentId: 'sub_call_agent_1',
+      agentName: 'explore',
+      runInBackground: false,
+      model: 'local/gpt-5.6-sol',
+    });
+    startAgent(explore, 'call_agent_1', 'explore');
+    group.attach('call_agent_1', explore);
+
+    const out = renderText(group);
+    expect(out).toContain('explore · local/gpt-5.6-sol · inspect project · 0 tools · 0s · Running');
+
+    group.dispose();
+    explore.dispose();
+  });
+
   it('renders a detached foreground subagent as backgrounded in the group, even after its ToolResult lands', () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);

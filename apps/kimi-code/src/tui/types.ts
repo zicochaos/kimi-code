@@ -120,6 +120,7 @@ export interface SubagentReplayBlockData {
   name?: string;
   text?: string;
   toolCalls?: readonly SubagentReplayToolCallData[];
+  model?: string;
 }
 
 export interface BackgroundAgentMetadata {
