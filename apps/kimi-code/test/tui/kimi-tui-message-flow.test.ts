@@ -44,6 +44,7 @@ import {
 } from '#/tui/commands/prompts';
 import type { QueuedMessage } from '#/tui/types';
 import type { ImageAttachmentStore } from '#/tui/utils/image-attachment-store';
+import { formatTerminalTitle } from '#/tui/utils/terminal-title';
 
 vi.mock('#/tui/commands/prompts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('#/tui/commands/prompts')>();
@@ -4924,6 +4925,7 @@ command = "vim"
     const originalTitle = process.title;
     const { driver } = await makeDriver(makeSession({ id: 'ses-1' }));
     const setTitle = vi.spyOn(driver.state.terminal, 'setTitle').mockImplementation(() => {});
+    const expectedTitle = formatTerminalTitle(driver.state.appState.workDir);
 
     try {
       process.title = 'kimi-test-runner';
@@ -4937,7 +4939,9 @@ command = "vim"
         () => {},
       );
 
-      expect(setTitle).toHaveBeenCalledWith('Implement terminal title');
+      expect(driver.state.appState.sessionTitle).toBe('Implement terminal title');
+      expect(setTitle).toHaveBeenCalledWith(expectedTitle);
+      expect(setTitle).not.toHaveBeenCalledWith('Implement terminal title');
       expect(process.title).toBe('kimi-test-runner');
     } finally {
       process.title = originalTitle;
@@ -4957,6 +4961,7 @@ command = "vim"
     const forkSession = vi.fn(async () => forked);
     const { driver, harness } = await makeDriver(source, { forkSession });
     const setTitle = vi.spyOn(driver.state.terminal, 'setTitle').mockImplementation(() => {});
+    const expectedTitle = formatTerminalTitle(driver.state.appState.workDir);
 
     try {
       process.title = 'kimi-test-runner';
@@ -4969,7 +4974,9 @@ command = "vim"
         });
         expect(driver.getCurrentSessionId()).toBe('ses-fork');
       });
-      expect(setTitle).toHaveBeenCalledWith('Fork: Source title');
+      expect(driver.state.appState.sessionTitle).toBe('Fork: Source title');
+      expect(setTitle).toHaveBeenCalledWith(expectedTitle);
+      expect(setTitle).not.toHaveBeenCalledWith('Fork: Source title');
       expect(process.title).toBe('kimi-test-runner');
       expect(source.close).toHaveBeenCalledOnce();
       expect(forked.onEvent).toHaveBeenCalledOnce();

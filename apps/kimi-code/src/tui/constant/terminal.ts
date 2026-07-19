@@ -30,10 +30,8 @@ export const OSC11_RESPONSE = new RegExp(
 export const OSC11_RESPONSE_PREFIX = `${ESC}]11;rgb:`;
 export const OSC11_RESPONSE_PREFIX_NO_ESC = "]11;rgb:";
 
-// Keep notification/title payloads bounded so terminal tabs and desktop
-// notifications stay readable.
+// Keep notification payloads bounded so desktop notifications stay readable.
 export const MAX_TERMINAL_NOTIFICATION_MESSAGE_LENGTH = 240;
-export const MAX_TERMINAL_TITLE_LENGTH = 32;
 
 // OSC 11 probing must be short because unsupported terminals do not reply.
 export const TERMINAL_THEME_DETECT_TIMEOUT_MS = 250;

@@ -15,6 +15,7 @@ import { WelcomeComponent } from '#/tui/components/chrome/welcome';
 import { KimiTUI, type KimiTUIStartupInput, type TUIState } from '#/tui/kimi-tui';
 import { copyTextToClipboard } from '#/utils/clipboard/clipboard-text';
 import { quoteShellArg } from '#/utils/shell-quote';
+import { formatTerminalTitle } from '#/tui/utils/terminal-title';
 import {
   DISABLE_TERMINAL_THEME_REPORTING,
   ENABLE_TERMINAL_THEME_REPORTING,
@@ -618,9 +619,20 @@ describe('KimiTUI startup', () => {
   it('enters picker startup for bare --session without creating a session', async () => {
     const harness = makeHarness();
     const driver = makeDriver(harness, makeStartupInput({ session: '' }));
+    const setTitle = vi.spyOn(driver.state.terminal, 'setTitle').mockImplementation(() => {});
+    const bootstrapFromPicker = vi
+      .spyOn(driver as any, 'bootstrapFromPicker')
+      .mockResolvedValue(undefined);
 
     await expect(driver.init()).resolves.toBe(false);
+    await (
+      driver as unknown as {
+        finishStartup(shouldReplayHistory: boolean): Promise<void>;
+      }
+    ).finishStartup(false);
 
+    expect(setTitle).toHaveBeenCalledWith(formatTerminalTitle('/tmp/proj-a'));
+    expect(bootstrapFromPicker).toHaveBeenCalledOnce();
     expect(harness.createSession).not.toHaveBeenCalled();
     expect(harness.resumeSession).not.toHaveBeenCalled();
     expect(driver.state.startupState).toBe('picker');
@@ -1165,37 +1177,49 @@ describe('KimiTUI startup', () => {
       createSession,
     });
     const driver = makeDriver(harness, makeStartupInput({ yolo: true, plan: true }));
+    const setTitle = vi.spyOn(driver.state.terminal, 'setTitle').mockImplementation(() => {});
+    const expectedTitle = formatTerminalTitle('/tmp/proj-a');
+    const originalTitle = process.title;
 
-    await expect(driver.init()).resolves.toBe(false);
+    try {
+      process.title = 'kimi-test-runner';
 
-    expect(driver.state.appState).toMatchObject({
-      sessionId: '',
-      model: '',
-      permissionMode: 'yolo',
-      planMode: true,
-    });
+      await expect(driver.init()).resolves.toBe(false);
+      await (
+        driver as unknown as {
+          finishStartup(shouldReplayHistory: boolean): Promise<void>;
+        }
+      ).finishStartup(false);
 
-    vi.mocked(promptPlatformSelection).mockResolvedValue('kimi-code');
-    await handleLoginCommand(driver as any);
+      vi.mocked(promptPlatformSelection).mockResolvedValue('kimi-code');
+      await handleLoginCommand(driver as any);
 
-    expect(createSession).toHaveBeenNthCalledWith(1, {
-      workDir: '/tmp/proj-a',
-      permission: 'yolo',
-      planMode: true,
-    });
-    expect(createSession).toHaveBeenNthCalledWith(2, {
-      workDir: '/tmp/proj-a',
-      model: 'k2',
-      thinking: 'off',
-      permission: 'yolo',
-      planMode: true,
-    });
-    expect(driver.state.appState).toMatchObject({
-      sessionId: 'ses-1',
-      model: 'k2',
-      permissionMode: 'yolo',
-      planMode: true,
-    });
+      expect(createSession).toHaveBeenNthCalledWith(1, {
+        workDir: '/tmp/proj-a',
+        permission: 'yolo',
+        planMode: true,
+      });
+      expect(createSession).toHaveBeenNthCalledWith(2, {
+        workDir: '/tmp/proj-a',
+        model: 'k2',
+        thinking: 'off',
+        permission: 'yolo',
+        planMode: true,
+      });
+      expect(driver.state.appState).toMatchObject({
+        sessionId: 'ses-1',
+        sessionTitle: 'Session title',
+        model: 'k2',
+        permissionMode: 'yolo',
+        planMode: true,
+      });
+      expect(setTitle).toHaveBeenCalledWith(expectedTitle);
+      expect(setTitle.mock.calls.every(([title]) => title === expectedTitle)).toBe(true);
+      expect(setTitle).not.toHaveBeenCalledWith('Session title');
+      expect(process.title).toBe('kimi-test-runner');
+    } finally {
+      process.title = originalTitle;
+    }
   });
 
   it('does not force manual permission after OAuth login without --yolo', async () => {
