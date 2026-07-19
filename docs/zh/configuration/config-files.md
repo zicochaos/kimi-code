@@ -102,7 +102,7 @@ timeout = 5
 | `default_plan_mode` | `boolean` | `false` | 新会话是否默认以 Plan 模式（先出计划再执行）启动 |
 | `merge_all_available_skills` | `boolean` | `true` | 是否合并所有目录中的 Agent Skills |
 | `extra_skill_dirs` | `array<string>` | — | 额外 Skill 搜索目录，叠加到默认目录之上 |
-| `disabled_skills` | `array<string>` | `[]` | 在 Kimi 中完全禁用的 Skill 名称（模型列表、Skill 工具、斜杠菜单与用户激活）。大小写不敏感。磁盘上的文件保留 |
+| `disabled_skills` | `array<string>` | `[]` | 在 Kimi 中完全禁用的 Skill 名称（模型列表、Skill 工具、斜杠菜单与用户激活）。大小写不敏感。磁盘上的文件保留。不拦截用 `Bash` 等工具「复现」Skill 工作流的行为——需要时配合 [`permission`](#permission) deny 规则。详见 [Agent Skills](../customization/skills.md#skill-存放位置) |
 | `telemetry` | `boolean` | `true` | 是否启用匿名遥测；显式设为 `false` 时关闭 |
 | `providers` | `table` | `{}` | API 供应商表 → [`providers`](#providers) |
 | `models` | `table` | — | 模型别名表 → [`models`](#models) |
@@ -309,6 +309,8 @@ api_key = "sk-xxx"
 
 内置工具名见[内置工具](../reference/tools.md)。大多数支持规则参数的内置工具会定义自己的匹配对象，例如 `Bash(command-pattern)` 或 `Read(path-pattern)`。`AgentSwarm`、MCP 工具和自定义工具只能按工具名匹配，不支持参数模式。
 
+**权限模式与 deny：** `default_permission_mode`（`manual` / `yolo` / `auto`）只影响「没有 deny 命中时」的行为。`decision = "deny"` 的规则始终拦截匹配的工具调用，**包括 YOLO 模式**。
+
 ```toml
 [[permission.rules]]
 decision = "allow"
@@ -325,6 +327,20 @@ pattern = "Bash(rm -rf*)"
 [[permission.rules]]
 decision = "ask"
 pattern = "Bash"
+```
+
+若要在隐藏 Skill 的同时拦住「用 shell 复现其工作流」的辅助命令（例如配合 `disabled_skills`）：
+
+```toml
+disabled_skills = ["grok-delegation", "pi-delegation"]
+
+[[permission.rules]]
+decision = "deny"
+pattern = "Bash(*grok-delegate*)"
+
+[[permission.rules]]
+decision = "deny"
+pattern = "Bash(*pi-delegate*)"
 ```
 
 ::: tip

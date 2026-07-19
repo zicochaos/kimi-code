@@ -91,6 +91,22 @@ Disabled names are case-insensitive. Matching Skills are removed from the model 
 
 This is stronger than frontmatter `disableModelInvocation: true` (which only blocks automatic model invocation while still allowing slash use) and stronger than a permission deny rule for `Skill(...)` (which can block the tool call but still leaves the Skill in the model listing).
 
+`disabled_skills` only covers the Skill surface. The agent may still reimplement a skill's workflow with other tools — for example running a helper binary via `Bash` because a handoff document or earlier conversation showed that command. To block those shell paths as well, add deny rules (deny still applies in YOLO mode):
+
+```toml
+disabled_skills = ["grok-delegation", "pi-delegation"]
+
+[[permission.rules]]
+decision = "deny"
+pattern = "Bash(*grok-delegate*)"
+
+[[permission.rules]]
+decision = "deny"
+pattern = "Bash(*pi-delegate*)"
+```
+
+See [Permission rules](../configuration/config-files.md#permission) for the full rule format.
+
 **System Skills** are distributed with the CLI and registered at runtime. They provide product-aware workflows that should be available without user installation, while still being lower priority than project, user, and extra Skill directories.
 
 **Built-in Skills** are distributed with the CLI and have the lowest priority. They provide out-of-the-box workflows for common tasks — for example, configuring MCP servers, customizing the TUI theme, and editing config files. See [Built-in skill commands](../reference/slash-commands.md#built-in-skill-commands) for the full list.
