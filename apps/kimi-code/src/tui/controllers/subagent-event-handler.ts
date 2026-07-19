@@ -408,6 +408,7 @@ export class SubAgentEventHandler {
       progress.registerSubagent({
         agentId: event.subagentId,
         swarmIndex: event.swarmIndex,
+        model: event.model,
       });
     })) {
       return;
