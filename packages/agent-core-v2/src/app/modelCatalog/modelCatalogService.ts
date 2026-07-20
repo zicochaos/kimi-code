@@ -28,7 +28,7 @@ import type {
 import { InstantiationType } from '#/_base/di/extensions';
 import { LifecycleScope, registerScopedService } from '#/_base/di/scope';
 import { IOAuthService } from '#/app/auth/auth';
-import { IConfigService } from '#/app/config/config';
+import { ConfigTarget, IConfigService } from '#/app/config/config';
 import { ErrorCodes, Error2 } from '#/errors';
 import { IEventService } from '#/app/event/event';
 import { IModelService, MODELS_SECTION, type ModelAlias } from '#/app/model/model';
@@ -99,7 +99,12 @@ export class ModelCatalogService implements IModelCatalogService {
     if (alias === undefined) {
       throw new Error2(ErrorCodes.MODEL_NOT_FOUND, `model ${modelId} does not exist`);
     }
-    await this.config.set(DEFAULT_MODEL_SECTION, modelId);
+    const persistDefaultModel = this.config.get<boolean | undefined>('persistDefaultModel') !== false;
+    await this.config.set(
+      DEFAULT_MODEL_SECTION,
+      modelId,
+      persistDefaultModel ? ConfigTarget.User : ConfigTarget.Memory,
+    );
     const updatedAlias = this.modelService.get(modelId) ?? alias;
     return {
       default_model: modelId,

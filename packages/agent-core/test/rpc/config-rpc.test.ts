@@ -109,6 +109,249 @@ max_steps_per_turn = "nope"
   });
 });
 
+describe('KimiCore setKimiConfig persist_default_model', () => {
+  const PDM_TOML = `
+persist_default_model = false
+default_model = "disk-model"
+
+[thinking]
+effort = "high"
+
+[providers.p]
+type = "kimi"
+api_key = "k"
+
+[models.disk-model]
+provider = "p"
+model = "disk"
+max_context_size = 1000
+
+[models.session-model]
+provider = "p"
+model = "session"
+max_context_size = 1000
+`;
+
+  it('model-only patch keeps session defaultModel without writing disk', async () => {
+    const home = await makeHome(PDM_TOML);
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+    const before = await readFile(configPath, 'utf-8');
+
+    const runtime = await core.setKimiConfig({
+      defaultModel: 'session-model',
+      thinking: { effort: 'low' },
+    });
+    expect(runtime.defaultModel).toBe('session-model');
+    expect(runtime.thinking?.effort).toBe('low');
+    expect(runtime.persistDefaultModel).toBe(false);
+
+    const after = await readFile(configPath, 'utf-8');
+    expect(after).toBe(before);
+    expect(after).toContain('default_model = "disk-model"');
+    expect(after).not.toMatch(/default_model\s*=\s*"session-model"/);
+
+    const again = await core.getKimiConfig({});
+    expect(again.defaultModel).toBe('session-model');
+  });
+
+  it('non-model patch freezes default_model on disk but keeps session model in runtime', async () => {
+    const home = await makeHome(PDM_TOML);
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+
+    const runtime = await core.setKimiConfig({
+      defaultModel: 'session-model',
+      thinking: { effort: 'low' },
+      models: {
+        'disk-model': {
+          provider: 'p',
+          model: 'disk',
+          maxContextSize: 1000,
+        },
+        'session-model': {
+          provider: 'p',
+          model: 'session',
+          maxContextSize: 1000,
+        },
+        extra: {
+          provider: 'p',
+          model: 'extra',
+          maxContextSize: 1000,
+        },
+      },
+    });
+    expect(runtime.defaultModel).toBe('session-model');
+    expect(runtime.thinking?.effort).toBe('low');
+    expect(runtime.models?.['extra']).toBeDefined();
+
+    const text = await readFile(configPath, 'utf-8');
+    expect(text).toContain('default_model = "disk-model"');
+    expect(text).not.toMatch(/default_model\s*=\s*"session-model"/);
+    expect(text).toMatch(/\[models\.extra\]/);
+  });
+
+  it('model-only patch still persists when flag is true', async () => {
+    const home = await makeHome(`
+persist_default_model = true
+default_model = "disk-model"
+
+[providers.p]
+type = "kimi"
+api_key = "k"
+
+[models.disk-model]
+provider = "p"
+model = "disk"
+max_context_size = 1000
+
+[models.session-model]
+provider = "p"
+model = "session"
+max_context_size = 1000
+`);
+    const core = makeCore(home);
+    const runtime = await core.setKimiConfig({ defaultModel: 'session-model' });
+    expect(runtime.defaultModel).toBe('session-model');
+    const text = await readFile(path.join(home, 'config.toml'), 'utf-8');
+    expect(text).toContain('default_model = "session-model"');
+  });
+
+  it('sequential model-only patches keep prior session defaultModel when flag is false', async () => {
+    const home = await makeHome(PDM_TOML);
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+    const before = await readFile(configPath, 'utf-8');
+
+    await core.setKimiConfig({ defaultModel: 'session-model' });
+    const runtime = await core.setKimiConfig({ thinking: { effort: 'low' } });
+
+    expect(runtime.defaultModel).toBe('session-model');
+    expect(runtime.thinking?.effort).toBe('low');
+    expect(await readFile(configPath, 'utf-8')).toBe(before);
+  });
+
+  it('non-model patch after session model keeps session defaultModel and freezes disk', async () => {
+    const home = await makeHome(PDM_TOML);
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+
+    await core.setKimiConfig({ defaultModel: 'session-model', thinking: { effort: 'low' } });
+    const runtime = await core.setKimiConfig({
+      models: {
+        'disk-model': {
+          provider: 'p',
+          model: 'disk',
+          maxContextSize: 1000,
+        },
+        'session-model': {
+          provider: 'p',
+          model: 'session',
+          maxContextSize: 1000,
+        },
+        extra: {
+          provider: 'p',
+          model: 'extra',
+          maxContextSize: 1000,
+        },
+      },
+    });
+
+    expect(runtime.defaultModel).toBe('session-model');
+    expect(runtime.thinking?.effort).toBe('low');
+    expect(runtime.models?.['extra']).toBeDefined();
+
+    const text = await readFile(configPath, 'utf-8');
+    expect(text).toContain('default_model = "disk-model"');
+    expect(text).not.toMatch(/default_model\s*=\s*"session-model"/);
+    expect(text).toMatch(/\[models\.extra\]/);
+    // thinking on disk must stay frozen at the original high effort
+    expect(text).toMatch(/effort\s*=\s*"high"/);
+  });
+
+  it('disabling persistence mid-patch freezes disk model and keeps runtime session model', async () => {
+    // Disk flag true; patch { persistDefaultModel: false, defaultModel: 'session-model' }
+    // → disk keeps old default_model, has persist_default_model=false, runtime has session-model
+    const home = await makeHome(`
+persist_default_model = true
+default_model = "disk-model"
+
+[thinking]
+effort = "high"
+
+[providers.p]
+type = "kimi"
+api_key = "k"
+
+[models.disk-model]
+provider = "p"
+model = "disk"
+max_context_size = 1000
+
+[models.session-model]
+provider = "p"
+model = "session"
+max_context_size = 1000
+`);
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+
+    const runtime = await core.setKimiConfig({
+      persistDefaultModel: false,
+      defaultModel: 'session-model',
+    });
+    expect(runtime.defaultModel).toBe('session-model');
+    expect(runtime.persistDefaultModel).toBe(false);
+
+    const text = await readFile(configPath, 'utf-8');
+    expect(text).toMatch(/persist_default_model\s*=\s*false/);
+    expect(text).toContain('default_model = "disk-model"');
+    expect(text).not.toMatch(/default_model\s*=\s*"session-model"/);
+  });
+
+  it('enabling persistence does not force runtime flag false; subsequent model patch persists', async () => {
+    // Disk flag false with session model; patch { persistDefaultModel: true }
+    // → runtime and disk show flag true; subsequent model patch persists
+    const home = await makeHome(PDM_TOML);
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+
+    await core.setKimiConfig({ defaultModel: 'session-model', thinking: { effort: 'low' } });
+    const enabled = await core.setKimiConfig({ persistDefaultModel: true });
+    expect(enabled.persistDefaultModel).toBe(true);
+    expect(enabled.defaultModel).toBe('session-model');
+
+    let text = await readFile(configPath, 'utf-8');
+    expect(text).toMatch(/persist_default_model\s*=\s*true/);
+
+    const afterModel = await core.setKimiConfig({ defaultModel: 'disk-model' });
+    expect(afterModel.defaultModel).toBe('disk-model');
+    expect(afterModel.persistDefaultModel).toBe(true);
+
+    text = await readFile(configPath, 'utf-8');
+    expect(text).toContain('default_model = "disk-model"');
+    expect(text).toMatch(/persist_default_model\s*=\s*true/);
+  });
+
+  it('keeps session default model across getKimiConfig({ reload: true }) when persist_default_model=false', async () => {
+    // /model → setKimiConfig (session-only) then refreshConfigAfterLogin → getKimiConfig({ reload: true })
+    // must not drop the session model by re-reading disk-model from config.toml.
+    const home = await makeHome(PDM_TOML);
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+
+    await core.setKimiConfig({ defaultModel: 'session-model', thinking: { effort: 'low' } });
+    const reloaded = await core.getKimiConfig({ reload: true });
+    expect(reloaded.defaultModel).toBe('session-model');
+    expect(reloaded.thinking?.effort).toBe('low');
+    expect(reloaded.persistDefaultModel).toBe(false);
+
+    const text = await readFile(configPath, 'utf-8');
+    expect(text).toContain('default_model = "disk-model"');
+    expect(text).not.toMatch(/default_model\s*=\s*"session-model"/);
+  });
+});
+
 describe('KimiCore imageLimits scoping', () => {
   it('two cores keep independent [image] limits and only follow their own reloads', async () => {
     const homeA = await makeHome(`${VALID_TOML}
