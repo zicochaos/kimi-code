@@ -24,3 +24,22 @@ export function freezeDefaultModelForDisk(runtime: KimiConfig, disk: KimiConfig)
     thinking: disk.thinking,
   };
 }
+
+/**
+ * Decide whether a setKimiConfig call should touch disk, and if so what to write.
+ * When `persist_default_model = false`, model-only switches stay session-only;
+ * other writes still go to disk with defaultModel/thinking frozen to disk values.
+ */
+export function planConfigWrite(args: {
+  disk: KimiConfig;
+  patch: KimiConfigPatch;
+  merged: KimiConfig;
+}): { write: false } | { write: true; configForDisk: KimiConfig } {
+  if (!shouldPersistDefaultModel(args.disk) && isDefaultModelOnlyPatch(args.patch)) {
+    return { write: false };
+  }
+  if (!shouldPersistDefaultModel(args.disk)) {
+    return { write: true, configForDisk: freezeDefaultModelForDisk(args.merged, args.disk) };
+  }
+  return { write: true, configForDisk: args.merged };
+}

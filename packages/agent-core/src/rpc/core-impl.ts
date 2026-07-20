@@ -13,16 +13,20 @@ import { getCoreVersion } from '#/version';
 import { resolveThinkingEffort } from '../agent/config/thinking';
 import { Agent } from '../agent';
 import {
+  applyEnvModelConfig,
   applyPrintModeConfigDefaults,
   ensureKimiHome,
+  isDefaultModelOnlyPatch,
   loadRuntimeConfigSafe,
   mergeConfigPatch,
+  planConfigWrite,
   readConfigFileForUpdate,
   normalizeAdditionalDirs,
   readWorkspaceAdditionalDirs,
   resolveWorkspaceAdditionalDirs,
   resolveConfigPath,
   resolveKimiHome,
+  shouldPersistDefaultModel,
   writeConfigFile,
   type KimiConfig,
   type McpRemoteServerConfig,
@@ -650,8 +654,41 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }
 
   async setKimiConfig(input: SetKimiConfigPayload): Promise<KimiConfig> {
-    const config = mergeConfigPatch(this.readConfigForWrite(), input);
-    await writeConfigFile(this.configPath, config);
+    const disk = this.readConfigForWrite();
+    const merged = mergeConfigPatch(disk, input);
+    const plan = planConfigWrite({ disk, patch: input, merged });
+
+    if (plan.write) {
+      await writeConfigFile(this.configPath, plan.configForDisk);
+    }
+
+    if (!shouldPersistDefaultModel(disk) && isDefaultModelOnlyPatch(input)) {
+      // Keep session model in memory; do NOT reload from disk.
+      // Preserve disk `raw` so future freezes still see original default_model.
+      const runtimeBase = {
+        ...merged,
+        raw: disk.raw ?? merged.raw,
+        persistDefaultModel: disk.persistDefaultModel,
+      };
+      return this.setRuntimeConfig(applyEnvModelConfig(runtimeBase, process.env));
+    }
+
+    if (!shouldPersistDefaultModel(disk)) {
+      // Disk was frozen; reload would drop session defaultModel/thinking if the
+      // patch also changed them. Re-apply merged session values after reload base.
+      const loaded = loadRuntimeConfigSafe(this.configPath);
+      if (loaded.fileWarnings.length === 0) {
+        const runtime = {
+          ...loaded.config,
+          defaultModel: merged.defaultModel,
+          thinking: merged.thinking,
+          raw: loaded.config.raw,
+          persistDefaultModel: disk.persistDefaultModel,
+        };
+        return this.setRuntimeConfig(applyEnvModelConfig(runtime, process.env));
+      }
+    }
+
     return this.reloadRuntimeConfig();
   }
 
