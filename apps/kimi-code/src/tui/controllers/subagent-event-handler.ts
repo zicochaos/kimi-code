@@ -27,6 +27,7 @@ export interface SubagentInfo {
   readonly name: string;
   readonly runInBackground: boolean;
   readonly swarmIndex?: number;
+  readonly model?: string;
 }
 
 export type SubagentLifecycleEvent = Event & { type: `subagent.${string}` };
@@ -87,7 +88,7 @@ export class SubAgentEventHandler {
 
     const toolCall = this.host.streamingUI.getToolComponent(parentToolCallId);
     if (toolCall === undefined) return true;
-    toolCall.setSubagentMeta(childAgentId, info.name);
+    toolCall.setSubagentMeta(childAgentId, info.name, info.model);
 
     if (event.type === 'hook.result') {
       toolCall.appendSubagentText(formatHookResultPlain(event), 'text');
@@ -396,6 +397,7 @@ export class SubAgentEventHandler {
       name: event.subagentName,
       runInBackground: event.runInBackground,
       swarmIndex: event.swarmIndex,
+      model: event.model,
     });
   }
 
@@ -406,6 +408,7 @@ export class SubAgentEventHandler {
       progress.registerSubagent({
         agentId: event.subagentId,
         swarmIndex: event.swarmIndex,
+        model: event.model,
       });
     })) {
       return;
@@ -418,6 +421,7 @@ export class SubAgentEventHandler {
       agentId: event.subagentId,
       agentName: event.subagentName,
       runInBackground: event.runInBackground,
+      model: event.model,
     });
   }
 
@@ -437,6 +441,7 @@ export class SubAgentEventHandler {
       agentId: event.subagentId,
       agentName: info.name,
       runInBackground: info.runInBackground,
+      model: info.model,
     });
   }
 

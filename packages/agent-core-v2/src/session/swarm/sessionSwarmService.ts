@@ -144,10 +144,11 @@ export class SessionSwarmService implements ISessionSwarmService {
     if (callerData.modelAlias === undefined && options.modelAlias === undefined) {
       throw new Error('Caller agent has no model bound');
     }
+    const modelAlias = options.modelAlias ?? callerData.modelAlias;
     const child = await this.lifecycle.create({
       binding: {
         profile: profile.name,
-        model: options.modelAlias ?? callerData.modelAlias,
+        model: modelAlias,
         thinking: callerData.thinkingLevel,
         cwd: callerData.cwd,
       },
@@ -166,6 +167,7 @@ export class SessionSwarmService implements ISessionSwarmService {
       description: options.description,
       swarmIndex: options.swarmIndex,
       runInBackground: options.runInBackground,
+      model: modelAlias,
     });
     const promptText = await applyProfilePromptPrefix(profile, options.prompt, {
       cwd: this.sessionContext.cwd,
@@ -190,8 +192,8 @@ export class SessionSwarmService implements ISessionSwarmService {
     const child = this.requireHandle(agentId, 'Agent instance');
     this.requireIdleSubagent(agentId, child);
     await this.realignChildModel(caller, child, options.modelAlias);
-    const profileName =
-      child.accessor.get(IAgentProfileService).data().profileName ?? RESUMED_PROFILE_FALLBACK;
+    const childProfile = child.accessor.get(IAgentProfileService).data();
+    const profileName = childProfile.profileName ?? RESUMED_PROFILE_FALLBACK;
     if (!retryTurn) {
       emitAgentRunSpawned(caller, agentId, {
         profileName,
@@ -200,6 +202,7 @@ export class SessionSwarmService implements ISessionSwarmService {
         description: options.description,
         swarmIndex: options.swarmIndex,
         runInBackground: options.runInBackground,
+        model: childProfile.modelAlias,
       });
     }
     const request = retryTurn

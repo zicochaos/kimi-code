@@ -100,6 +100,7 @@ export interface ToolCallSubagentSnapshot {
   readonly isError: boolean;
   readonly errorText: string | undefined;
   readonly latestActivity: string | undefined;
+  readonly model: string | undefined;
 }
 
 /**
@@ -559,6 +560,7 @@ export class ToolCallComponent extends Container {
   // parent tool call resolves.
   private subagentAgentId: string | undefined;
   private subagentAgentName: string | undefined;
+  private subagentModel: string | undefined;
   private readonly ongoingSubCalls = new Map<string, OngoingSubCall>();
   private readonly finishedSubCalls: FinishedSubCall[] = [];
   private readonly subToolActivities = new Map<string, SubToolActivity>();
@@ -814,6 +816,7 @@ export class ToolCallComponent extends Container {
     if (subagent === undefined) return;
     this.subagentAgentId = subagent.id;
     this.subagentAgentName = subagent.name;
+    this.subagentModel = subagent.model;
     this.subagentText = subagent.text ?? '';
     for (const call of subagent.toolCalls ?? []) {
       if (call.result === undefined) {
@@ -843,10 +846,11 @@ export class ToolCallComponent extends Container {
 
   // ── Subagent API (called by KimiTUI event routing) ───────────────
 
-  setSubagentMeta(agentId: string, agentName?: string): void {
-    if (this.subagentAgentId === agentId && this.subagentAgentName === agentName) return;
+  setSubagentMeta(agentId: string, agentName?: string, model?: string): void {
+    if (this.subagentAgentId === agentId && this.subagentAgentName === agentName && this.subagentModel === model) return;
     this.subagentAgentId = agentId;
     this.subagentAgentName = agentName;
+    this.subagentModel = model;
     this.headerText.setText(this.buildHeader());
     this.rebuildContent();
     this.notifySnapshotChange();
@@ -906,6 +910,7 @@ export class ToolCallComponent extends Container {
       isError: derivedPhase === 'failed',
       errorText,
       latestActivity,
+      model: this.subagentModel,
     };
   }
 
@@ -1098,9 +1103,11 @@ export class ToolCallComponent extends Container {
     agentId: string;
     agentName?: string | undefined;
     runInBackground: boolean;
+    model?: string | undefined;
   }): void {
     this.subagentAgentId = meta.agentId;
     this.subagentAgentName = meta.agentName;
+    this.subagentModel = meta.model;
     this.subagentPhase = meta.runInBackground ? 'backgrounded' : 'queued';
     this.subagentStartedAtMs = Date.now();
     this.subagentEndedAtMs = undefined;
@@ -1116,9 +1123,11 @@ export class ToolCallComponent extends Container {
     agentId: string;
     agentName?: string | undefined;
     runInBackground: boolean;
+    model?: string | undefined;
   }): void {
     this.subagentAgentId = meta.agentId;
     this.subagentAgentName = meta.agentName;
+    if (meta.model !== undefined) this.subagentModel = meta.model;
     if (
       !meta.runInBackground &&
       (this.subagentPhase === undefined || this.subagentPhase === 'queued')
@@ -1759,11 +1768,15 @@ export class ToolCallComponent extends Container {
     const descriptionPlain = description.length > 0 ? ` (${description})` : '';
     const descriptionText = descriptionPlain.length > 0 ? currentTheme.dim(descriptionPlain) : '';
     const statsText = this.formatSingleSubagentStatsText();
+    const modelChip =
+      this.subagentModel !== undefined && this.subagentModel.length > 0
+        ? currentTheme.dim(` · ${this.subagentModel}`)
+        : '';
     if (isDone) {
-      return `${marker}${currentTheme.boldFg('success', labelText)} ${currentTheme.fg('success', `Completed${descriptionPlain}${statsText}`)}`;
+      return `${marker}${currentTheme.boldFg('success', labelText)}${modelChip} ${currentTheme.fg('success', `Completed${descriptionPlain}${statsText}`)}`;
     }
     const stats = currentTheme.dim(statsText);
-    return `${marker}${label} ${status}${descriptionText}${stats}`;
+    return `${marker}${label} ${status}${descriptionText}${modelChip}${stats}`;
   }
 
   private formatSingleSubagentStatus(phase: SubagentPhase | undefined): string {

@@ -335,6 +335,7 @@ describe('SessionSubagentHost', () => {
           subagentName: 'explore',
           parentAgentId: 'main',
           parentToolCallId: 'call_agent',
+          model: 'mock-model',
         }),
       }),
     );
@@ -403,6 +404,15 @@ describe('SessionSubagentHost', () => {
     await handle.completion;
 
     expect(child.agent.config.modelAlias).toBe('mock-model');
+    expect(parent.allEvents).toContainEqual(
+      expect.objectContaining({
+        type: '[rpc]',
+        event: 'subagent.spawned',
+        args: expect.objectContaining({
+          model: 'mock-model',
+        }),
+      }),
+    );
   });
 
   it('inherits active parent user tools when spawning a subagent', async () => {
