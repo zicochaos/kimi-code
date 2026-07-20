@@ -113,6 +113,43 @@ describe('planConfigWrite', () => {
       configForDisk: merged,
     });
   });
+
+  it('uses effective (merged) flag: disk true + patch false freezes model', () => {
+    const disk = { ...base, persistDefaultModel: true, defaultModel: 'disk-model' } as KimiConfig;
+    const patch = { persistDefaultModel: false, defaultModel: 'session-model' };
+    const merged = { ...disk, ...patch } as KimiConfig;
+    const plan = planConfigWrite({ disk, patch, merged });
+    expect(plan.write).toBe(true);
+    if (!plan.write) throw new Error('expected write');
+    expect(plan.configForDisk.persistDefaultModel).toBe(false);
+    expect(plan.configForDisk.defaultModel).toBe('disk-model');
+    expect(merged.defaultModel).toBe('session-model');
+  });
+
+  it('uses effective (merged) flag: disk false + patch true writes merged', () => {
+    const disk = { ...base, persistDefaultModel: false, defaultModel: 'disk-model' } as KimiConfig;
+    const patch = { persistDefaultModel: true };
+    const merged = {
+      ...disk,
+      persistDefaultModel: true,
+      defaultModel: 'session-model',
+    } as KimiConfig;
+    expect(planConfigWrite({ disk, patch, merged })).toEqual({
+      write: true,
+      configForDisk: merged,
+    });
+  });
+
+  it('pure flag toggle to false still writes (does not skip as model-only)', () => {
+    const disk = { ...base, persistDefaultModel: true } as KimiConfig;
+    const patch = { persistDefaultModel: false };
+    const merged = { ...disk, persistDefaultModel: false } as KimiConfig;
+    const plan = planConfigWrite({ disk, patch, merged });
+    expect(plan.write).toBe(true);
+    if (!plan.write) throw new Error('expected write');
+    expect(plan.configForDisk.persistDefaultModel).toBe(false);
+    expect(plan.configForDisk.defaultModel).toBe('disk-model');
+  });
 });
 
 describe('persist_default_model disk behavior', () => {
