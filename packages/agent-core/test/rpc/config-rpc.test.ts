@@ -216,6 +216,58 @@ max_context_size = 1000
     const text = await readFile(path.join(home, 'config.toml'), 'utf-8');
     expect(text).toContain('default_model = "session-model"');
   });
+
+  it('sequential model-only patches keep prior session defaultModel when flag is false', async () => {
+    const home = await makeHome(PDM_TOML);
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+    const before = await readFile(configPath, 'utf-8');
+
+    await core.setKimiConfig({ defaultModel: 'session-model' });
+    const runtime = await core.setKimiConfig({ thinking: { effort: 'low' } });
+
+    expect(runtime.defaultModel).toBe('session-model');
+    expect(runtime.thinking?.effort).toBe('low');
+    expect(await readFile(configPath, 'utf-8')).toBe(before);
+  });
+
+  it('non-model patch after session model keeps session defaultModel and freezes disk', async () => {
+    const home = await makeHome(PDM_TOML);
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+
+    await core.setKimiConfig({ defaultModel: 'session-model', thinking: { effort: 'low' } });
+    const runtime = await core.setKimiConfig({
+      models: {
+        'disk-model': {
+          provider: 'p',
+          model: 'disk',
+          maxContextSize: 1000,
+        },
+        'session-model': {
+          provider: 'p',
+          model: 'session',
+          maxContextSize: 1000,
+        },
+        extra: {
+          provider: 'p',
+          model: 'extra',
+          maxContextSize: 1000,
+        },
+      },
+    });
+
+    expect(runtime.defaultModel).toBe('session-model');
+    expect(runtime.thinking?.effort).toBe('low');
+    expect(runtime.models?.['extra']).toBeDefined();
+
+    const text = await readFile(configPath, 'utf-8');
+    expect(text).toContain('default_model = "disk-model"');
+    expect(text).not.toMatch(/default_model\s*=\s*"session-model"/);
+    expect(text).toMatch(/\[models\.extra\]/);
+    // thinking on disk must stay frozen at the original high effort
+    expect(text).toMatch(/effort\s*=\s*"high"/);
+  });
 });
 
 describe('KimiCore imageLimits scoping', () => {

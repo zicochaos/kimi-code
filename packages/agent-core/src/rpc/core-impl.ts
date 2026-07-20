@@ -655,7 +655,16 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
 
   async setKimiConfig(input: SetKimiConfigPayload): Promise<KimiConfig> {
     const disk = this.readConfigForWrite();
-    const merged = mergeConfigPatch(disk, input);
+    // When default model is session-only, later patches must not re-base on disk
+    // and drop the in-memory defaultModel/thinking. Freeze still uses `disk`.
+    const base = shouldPersistDefaultModel(disk)
+      ? disk
+      : {
+          ...disk,
+          defaultModel: this.config.defaultModel,
+          thinking: this.config.thinking,
+        };
+    const merged = mergeConfigPatch(base, input);
     const plan = planConfigWrite({ disk, patch: input, merged });
 
     if (plan.write) {
