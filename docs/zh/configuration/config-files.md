@@ -99,6 +99,7 @@ timeout = 5
 | --- | --- | --- | --- |
 | `default_model` | `string` | — | 默认模型别名，必须在 `models` 中定义 |
 | `persist_default_model` | `boolean` | `true` | 设为 `false` 时，`/model` 与默认模型 API 更新仅对当前进程生效，不会回写 `config.toml` 里的 `default_model` 或 `thinking`。适用于 `config.toml` 由同步或版本控制来源管理的场景（例如 Dotter 软链接）。其他配置写入仍正常持久化 |
+| `agents_md_expand_includes` | `boolean` | `false` | 设为 `true` 时，AGENTS.md 中形如 `@path` 的行会在会话启动时替换为目标文件内容（绝对路径，或相对该 AGENTS.md 的路径）。支持嵌套 include；缺失或循环引用会变成 HTML 注释。默认关闭，使托管指令文件保持字面内容 |
 | `default_permission_mode` | `string` | `manual` | 新会话的默认权限模式，可选 `manual`（逐次询问）、`yolo`（自动批准工具操作，Agent 仍可能提问）、`auto`（完全自主，Agent 自己做决定，不再提问） |
 | `default_plan_mode` | `boolean` | `false` | 新会话是否默认以 Plan 模式（先出计划再执行）启动 |
 | `merge_all_available_skills` | `boolean` | `true` | 是否合并所有目录中的 Agent Skills |

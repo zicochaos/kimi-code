@@ -582,11 +582,15 @@ export class AgentProfileService implements IAgentProfileService {
     options?: ApplyProfileOptions,
   ): Promise<SystemPromptContext> {
     const effectiveCwd = cwd ?? this.sessionContext.cwd;
+    const expandIncludes = this.config.get<boolean | undefined>('agentsMdExpandIncludes') === true;
     const base = await prepareSystemPromptContext(
       { fs: this.fs, homeDir: this.env.homeDir },
       effectiveCwd,
       this.bootstrap.homeDir,
-      { additionalDirs: options?.additionalDirs ?? this.workspace.additionalDirs },
+      {
+        additionalDirs: options?.additionalDirs ?? this.workspace.additionalDirs,
+        expandIncludes,
+      },
     );
     const skills = await this.resolveSkillListing();
     return {
