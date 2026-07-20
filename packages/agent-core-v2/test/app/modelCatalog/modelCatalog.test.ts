@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DisposableStore } from '#/_base/di/lifecycle';
 import { createServices, type TestInstantiationService } from '#/_base/di/test';
 import { IOAuthService } from '#/app/auth/auth';
-import { IConfigRegistry, IConfigService } from '#/app/config/config';
+import { ConfigTarget, IConfigRegistry, IConfigService } from '#/app/config/config';
 import { ConfigRegistry } from '#/app/config/configService';
 import { isError2 } from '#/errors';
 import { IEventService } from '#/app/event/event';
@@ -32,6 +32,7 @@ interface Backing {
   models: Record<string, ModelAlias>;
   defaultModel?: string;
   thinking?: { enabled?: boolean; effort?: string };
+  persistDefaultModel?: boolean;
 }
 
 function seedBacking(): Backing {
@@ -311,7 +312,15 @@ describe('ModelCatalogService', () => {
         max_context_size: 32768,
       },
     });
-    expect(configSet).toHaveBeenCalledWith('defaultModel', 'turbo');
+    expect(configSet).toHaveBeenCalledWith('defaultModel', 'turbo', ConfigTarget.User);
+  });
+
+  it('keeps setDefaultModel in memory when persist_default_model is false', async () => {
+    backing.persistDefaultModel = false;
+    await expect(catalog().setDefaultModel('turbo')).resolves.toMatchObject({
+      default_model: 'turbo',
+    });
+    expect(configSet).toHaveBeenCalledWith('defaultModel', 'turbo', ConfigTarget.Memory);
   });
 
   it('throws model.not_found when setting an unknown default model', async () => {
