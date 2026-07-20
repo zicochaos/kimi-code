@@ -1,6 +1,7 @@
 export * from './merge';
 export * from './model';
 export * from './path';
+export * from './persist-default-model';
 export * from './print-defaults';
 export * from './resolve';
 export * from './schema';
