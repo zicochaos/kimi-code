@@ -332,6 +332,24 @@ max_context_size = 1000
     expect(text).toContain('default_model = "disk-model"');
     expect(text).toMatch(/persist_default_model\s*=\s*true/);
   });
+
+  it('keeps session default model across getKimiConfig({ reload: true }) when persist_default_model=false', async () => {
+    // /model → setKimiConfig (session-only) then refreshConfigAfterLogin → getKimiConfig({ reload: true })
+    // must not drop the session model by re-reading disk-model from config.toml.
+    const home = await makeHome(PDM_TOML);
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+
+    await core.setKimiConfig({ defaultModel: 'session-model', thinking: { effort: 'low' } });
+    const reloaded = await core.getKimiConfig({ reload: true });
+    expect(reloaded.defaultModel).toBe('session-model');
+    expect(reloaded.thinking?.effort).toBe('low');
+    expect(reloaded.persistDefaultModel).toBe(false);
+
+    const text = await readFile(configPath, 'utf-8');
+    expect(text).toContain('default_model = "disk-model"');
+    expect(text).not.toMatch(/default_model\s*=\s*"session-model"/);
+  });
 });
 
 describe('KimiCore imageLimits scoping', () => {

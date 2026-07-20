@@ -1304,6 +1304,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }
 
   private reloadRuntimeConfig(): KimiConfig {
+    const previous = this.config;
     const loaded = loadRuntimeConfigSafe(this.configPath);
     if (loaded.fileWarnings.length > 0) {
       // Keep the last good config: adopting a salvaged config mid-run could
@@ -1319,7 +1320,20 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       return this.config;
     }
     this.configWarnings = loaded.envWarnings;
-    return this.setRuntimeConfig(loaded.config);
+    let next = loaded.config;
+    // When session default model is not persisted (or was not), a reload from
+    // disk must not clobber the live session model — e.g. /model then
+    // refreshConfigAfterLogin → getKimiConfig({ reload: true }).
+    // loadRuntimeConfigSafe already applied env; previous.defaultModel is the
+    // env alias when KIMI_MODEL_* is active, so preserving it is correct.
+    if (!shouldPersistDefaultModel(previous) || !shouldPersistDefaultModel(next)) {
+      next = {
+        ...next,
+        defaultModel: previous.defaultModel,
+        thinking: previous.thinking,
+      };
+    }
+    return this.setRuntimeConfig(next);
   }
 
   /**
