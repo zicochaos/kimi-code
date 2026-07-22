@@ -187,3 +187,102 @@ describe('FooterComponent displayName override', () => {
     expect(footer.render(120).join('\n')).not.toContain('Remote Name');
   });
 });
+
+function stripAnsi(text: string): string {
+  return text.replaceAll(/\u001B\[[0-9;]*m/g, '');
+}
+
+const managedKimiModel: ModelAlias = {
+  provider: 'managed:kimi-code',
+  model: 'kimi-k2',
+  maxContextSize: 262144,
+};
+
+describe('FooterComponent managed quota', () => {
+  const previousChalkLevel = chalk.level;
+
+  beforeEach(() => {
+    chalk.level = 3;
+  });
+
+  afterEach(() => {
+    chalk.level = previousChalkLevel;
+  });
+
+  it('shows 5h/1w percentages on line 2 for the managed provider', () => {
+    const state: AppState = {
+      ...appState,
+      model: 'kimi-k2',
+      availableModels: { 'kimi-k2': managedKimiModel },
+      managedUsage: {
+        summary: { label: '1w limit', used: 12, limit: 100 },
+        limits: [{ label: '5h limit', used: 40, limit: 100 }],
+      },
+      managedUsageError: null,
+    };
+    const footer = new FooterComponent(state);
+    const line2 = stripAnsi(footer.render(120)[1]!);
+
+    expect(line2).toContain('1w: 12%');
+    expect(line2).toContain('5h: 40%');
+    expect(line2).toContain('context:');
+  });
+
+  it('hides quota when the active model is not on managed:kimi-code', () => {
+    const state: AppState = {
+      ...appState,
+      model: 'gpt-local',
+      availableModels: {
+        'gpt-local': {
+          provider: 'openai',
+          model: 'gpt-4o',
+          maxContextSize: 128000,
+        },
+      },
+      // Leftover cache from a previous managed model must not leak.
+      managedUsage: {
+        summary: { label: '1w limit', used: 12, limit: 100 },
+        limits: [{ label: '5h limit', used: 40, limit: 100 }],
+      },
+    };
+    const footer = new FooterComponent(state);
+    const line2 = stripAnsi(footer.render(120)[1]!);
+
+    expect(line2).not.toContain('1w:');
+    expect(line2).not.toContain('5h:');
+    expect(line2).toContain('context:');
+  });
+
+  it('lets a transient hint outrank the quota readout', () => {
+    const state: AppState = {
+      ...appState,
+      model: 'kimi-k2',
+      availableModels: { 'kimi-k2': managedKimiModel },
+      managedUsage: {
+        summary: { label: '1w limit', used: 12, limit: 100 },
+        limits: [{ label: '5h limit', used: 40, limit: 100 }],
+      },
+    };
+    const footer = new FooterComponent(state);
+    footer.setTransientHint('Press Ctrl+C again to exit');
+    const line2 = stripAnsi(footer.render(120)[1]!);
+
+    expect(line2).toContain('Press Ctrl+C again to exit');
+    expect(line2).not.toContain('1w:');
+    expect(line2).toContain('context:');
+  });
+
+  it('shows a quota error in place of percentages', () => {
+    const state: AppState = {
+      ...appState,
+      model: 'kimi-k2',
+      availableModels: { 'kimi-k2': managedKimiModel },
+      managedUsage: null,
+      managedUsageError: 'not signed in',
+    };
+    const footer = new FooterComponent(state);
+    const line2 = stripAnsi(footer.render(120)[1]!);
+
+    expect(line2).toContain('quota: not signed in');
+  });
+});

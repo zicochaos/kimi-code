@@ -484,6 +484,35 @@ export interface WireLogoutResult {
 }
 
 // ---------------------------------------------------------------------------
+// Managed usage wire DTOs (`GET /oauth/usage`) — snake_case via toWireUsage
+// ---------------------------------------------------------------------------
+
+export interface WireUsageRow {
+  label: string;
+  used: number;
+  limit: number;
+  reset_hint?: string;
+}
+
+export interface WireBoosterWallet {
+  balance_cents: number;
+  total_cents: number;
+  monthly_charge_limit_enabled: boolean;
+  monthly_charge_limit_cents: number;
+  monthly_used_cents: number;
+  currency: string;
+}
+
+export type WireManagedUsage =
+  | {
+      kind: 'ok';
+      summary: WireUsageRow | null;
+      limits: WireUsageRow[];
+      extra_usage: WireBoosterWallet | null;
+    }
+  | { kind: 'error'; message: string; status?: number };
+
+// ---------------------------------------------------------------------------
 // File upload wire DTOs
 // ---------------------------------------------------------------------------
 

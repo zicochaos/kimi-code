@@ -3,7 +3,7 @@
  *
  * Layout:
  *   Line 1: [yolo] [plan] <model> <cwd>  <git-badge>  <shortcut hints>
- *   Line 2: context: N% (tokens/max)
+ *   Line 2: plan quota (left, managed only) / transient hint  +  context (right)
  */
 
 import type { Component } from '@moonshot-ai/pi-tui';
@@ -11,11 +11,13 @@ import { truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
 import chalk from 'chalk';
 import { effectiveModelAlias } from '@moonshot-ai/kimi-code-sdk';
 
+import { isManagedUsageProvider } from '#/tui/constant/kimi-tui';
 import { ALL_TIPS, type ToolbarTip } from '#/tui/constant/tips';
 import { isRainbowDancing, renderDanceFooterModel } from '#/tui/easter-eggs/dance';
 import { currentTheme } from '#/tui/theme';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
+import { buildManagedUsageFooterView } from '#/tui/utils/managed-usage-footer';
 import {
   createGitStatusCache,
   formatGitBadgeBase,
@@ -170,6 +172,33 @@ function formatContextStatus(usage: number, tokens?: number, maxTokens?: number)
     return `context: ${pct}% (${formatTokenCount(tokens)}/${formatTokenCount(maxTokens)})`;
   }
   return `context: ${String(usagePercentFromRatio(usage))}%`;
+}
+
+type SeverityToken = 'success' | 'warning' | 'error';
+
+function severityToken(sev: 'ok' | 'warn' | 'danger'): SeverityToken {
+  return sev === 'danger' ? 'error' : sev === 'warn' ? 'warning' : 'success';
+}
+
+/**
+ * Footer plan-quota readout, e.g. `5h: 40% 1w: 12%`. Compact enough to share
+ * line 2 with the context meter. Only meaningful for the managed provider —
+ * callers should gate with `isManagedUsageProvider` before invoking.
+ */
+function formatManagedUsageStatus(
+  usage: AppState['managedUsage'],
+  error: AppState['managedUsageError'],
+  colors: ColorPalette,
+): string | null {
+  const view = buildManagedUsageFooterView(usage, error);
+  if (view === null) return null;
+  if (view.kind === 'error') {
+    return chalk.hex(colors.error)(view.text);
+  }
+  const parts = view.parts.map((part) =>
+    chalk.hex(colors[severityToken(part.severity)])(part.text),
+  );
+  return parts.join(' ');
 }
 
 export function formatFooterGitBadge(status: GitStatus, colors: ColorPalette): string {
@@ -332,26 +361,35 @@ export class FooterComponent implements Component {
       line1 = truncateToWidth(leftLine, width, '…');
     }
 
-    // ── Line 2: transient hint (bottom-left) + context (right) ──
+    // ── Line 2: transient hint / plan quota (bottom-left) + context (right) ──
     const contextText = formatContextStatus(
       state.contextUsage,
       state.contextTokens,
       state.maxContextTokens,
     );
     const contextWidth = visibleWidth(contextText);
+    // A transient hint (e.g. the exit double-tap prompt) outranks the quota
+    // readout for the left slot — it is short-lived and user-actionable.
+    // Quota itself is gated on the active model provider so a leftover cache
+    // never leaks onto a non-managed model.
+    const providerKey = state.availableModels[state.model]?.provider;
+    const quotaText =
+      this.transientHint || !isManagedUsageProvider(providerKey)
+        ? null
+        : formatManagedUsageStatus(state.managedUsage, state.managedUsageError, colors);
+    const leftText = this.transientHint
+      ? chalk.hex(colors.warning).bold(this.transientHint)
+      : quotaText;
     let line2: string;
-    if (this.transientHint) {
-      const maxHintWidth = Math.max(0, width - contextWidth - 1);
-      const shownHint =
-        visibleWidth(this.transientHint) <= maxHintWidth
-          ? this.transientHint
-          : truncateToWidth(this.transientHint, maxHintWidth, '…');
-      const hintWidth = visibleWidth(shownHint);
-      const pad = Math.max(0, width - hintWidth - contextWidth);
-      line2 =
-        chalk.hex(colors.warning).bold(shownHint) +
-        ' '.repeat(pad) +
-        chalk.hex(colors.text)(contextText);
+    if (leftText !== null) {
+      const maxLeftWidth = Math.max(0, width - contextWidth - 1);
+      const shownLeft =
+        visibleWidth(leftText) <= maxLeftWidth
+          ? leftText
+          : truncateToWidth(leftText, maxLeftWidth, '…');
+      const leftWidth = visibleWidth(shownLeft);
+      const pad = Math.max(0, width - leftWidth - contextWidth);
+      line2 = shownLeft + ' '.repeat(pad) + chalk.hex(colors.text)(contextText);
     } else {
       const leftPad = Math.max(0, width - contextWidth);
       line2 = ' '.repeat(leftPad) + chalk.hex(colors.text)(contextText);

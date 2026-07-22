@@ -92,7 +92,12 @@ import {
 import { ActivityPaneComponent, type ActivityPaneMode } from './components/panes/activity-pane';
 import { QueuePaneComponent } from './components/panes/queue-pane';
 import type { TuiConfig } from './config';
-import { LLM_NOT_SET_MESSAGE, MAIN_AGENT_ID, NO_ACTIVE_SESSION_MESSAGE } from './constant/kimi-tui';
+import {
+  isManagedUsageProvider,
+  LLM_NOT_SET_MESSAGE,
+  MAIN_AGENT_ID,
+  NO_ACTIVE_SESSION_MESSAGE,
+} from './constant/kimi-tui';
 import { CHROME_GUTTER } from './constant/rendering';
 import { formatTerminalTitle } from './utils/terminal-title';
 import { AuthFlowController } from './controllers/auth-flow';
@@ -231,6 +236,8 @@ function createInitialAppState(input: KimiTUIStartupInput): AppState {
     goal: null,
     mcpServersSummary: null,
     banner: undefined,
+    managedUsage: undefined,
+    managedUsageError: null,
   };
 }
 
@@ -337,6 +344,12 @@ export class KimiTUI {
 
   /** Timer that auto-clears the one-shot "moved to background" footer hint. */
   private detachHintClearTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Generation counter for managed-usage fetches. Each refresh bumps it and
+   * snapshots model/provider at start; a response that no longer matches is
+   * dropped so a slow fetch cannot paint another model's quota after switch.
+   */
+  private managedUsageRefreshGen = 0;
 
   // The currently-mounted approval panel, if any. Kept so the full-screen
   // preview viewer can restore focus to the exact same instance (and its
@@ -1474,6 +1487,7 @@ export class KimiTUI {
       'additionalDirs' in patch &&
       !sameStringArrays(this.state.appState.additionalDirs, patch.additionalDirs ?? []);
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
+    const modelChanged = 'model' in patch && patch.model !== this.state.appState.model;
     Object.assign(this.state.appState, patch);
     if ('planMode' in patch) this.updateEditorBorderHighlight();
     this.state.footer.setState(this.state.appState);
@@ -1483,6 +1497,9 @@ export class KimiTUI {
       this.sessionEventHandler.retryQueuedGoalPromotion();
     }
     if (additionalDirsChanged) this.setupAutocomplete();
+    // Model switch (picker, login, logout, resume) must refresh / clear quota
+    // immediately so the footer never shows another provider's numbers.
+    if (modelChanged) void this.refreshManagedUsage();
     this.state.ui.requestRender();
   }
 
@@ -1545,6 +1562,7 @@ export class KimiTUI {
 
   async syncRuntimeState(session: Session = this.requireSession()): Promise<void> {
     const [status, goalResult] = await Promise.all([session.getStatus(), session.getGoal()]);
+    const modelChanged = status.model !== this.state.appState.model;
     this.setAppState({
       sessionId: session.id,
       model: status.model ?? '',
@@ -1559,6 +1577,56 @@ export class KimiTUI {
       goal: goalResult.goal,
     });
     this.syncAdditionalDirs(session);
+    // Re-fetch on same-model session sync (e.g. resume / first attach after
+    // login). A model change already refreshes via setAppState.
+    if (!modelChanged) void this.refreshManagedUsage();
+  }
+
+  /**
+   * Pull the plan quota (5h/weekly windows) for the managed provider and cache
+   * it in appState so the footer can render it persistently. Fire-and-forget:
+   * failures land in `managedUsageError` and never block session sync.
+   *
+   * Snapshots generation + provider + model at start; a late response after a
+   * model switch is dropped. Non-managed models clear any cached quota
+   * immediately (no await).
+   */
+  async refreshManagedUsage(): Promise<void> {
+    const gen = ++this.managedUsageRefreshGen;
+    const model = this.state.appState.model;
+    const providerKey = this.state.appState.availableModels[model]?.provider;
+
+    if (!isManagedUsageProvider(providerKey)) {
+      if (
+        this.state.appState.managedUsage !== undefined ||
+        (this.state.appState.managedUsageError !== null &&
+          this.state.appState.managedUsageError !== undefined)
+      ) {
+        this.setAppState({ managedUsage: undefined, managedUsageError: null });
+      }
+      return;
+    }
+
+    const isCurrent = (): boolean =>
+      gen === this.managedUsageRefreshGen &&
+      this.state.appState.model === model &&
+      this.state.appState.availableModels[this.state.appState.model]?.provider === providerKey;
+
+    try {
+      const res = await this.harness.auth.getManagedUsage(providerKey);
+      if (!isCurrent()) return;
+      if (res.kind === 'error') {
+        this.setAppState({ managedUsage: null, managedUsageError: res.message });
+        return;
+      }
+      this.setAppState({
+        managedUsage: { summary: res.summary, limits: res.limits, extraUsage: res.extraUsage },
+        managedUsageError: null,
+      });
+    } catch (error) {
+      if (!isCurrent()) return;
+      this.setAppState({ managedUsage: null, managedUsageError: formatErrorMessage(error) });
+    }
   }
 
   // Apply --auto/--yolo/--plan startup flags to a resumed session. The resumed
