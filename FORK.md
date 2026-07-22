@@ -29,7 +29,7 @@ rg -n "disabled_skills|persist_default_model|agents_md_expand_includes|formatTer
 
 | Option | Default | Purpose | Key code |
 | --- | --- | --- | --- |
-| `disabled_skills` | `[]` | Hide skill names from listing, the `Skill` tool, and slash menus; files stay on disk for shared `~/.agents/skills` | agent-core and agent-core-v2 skill catalogs; kap-server workspace list and activation error mapping |
+| `disabled_skills` | `[]` | Hide skill names from listing, the `Skill` tool, slash menus, and plugin session-start guidance; files stay on disk for shared `~/.agents/skills` | agent-core and agent-core-v2 skill catalogs and reload paths; kap-server workspace/event schema; web skill caches |
 | `persist_default_model` | `true` | When `false`, model changes stay session-only and do not rewrite managed `config.toml` model settings | `packages/agent-core/src/config/persist-default-model.ts`, `packages/agent-core-v2/src/kosong/model/catalogService.ts` |
 | `agents_md_expand_includes` | `false` | When `true`, standalone `@path` lines in `AGENTS.md` are expanded at system-prompt assembly time | agent-core and agent-core-v2 profile context loaders |
 
@@ -57,6 +57,7 @@ rg -n "disabled_skills|persist_default_model|agents_md_expand_includes|formatTer
 | Managed quota sidebar card | Uses upstream `GET /api/v1/oauth/usage?provider=managed:kimi-code`; maps its snake_case wire response and ignores stale responses after model/provider changes |
 | Workspace skills honor `disabled_skills` | Session-less listing matches the session skill catalog |
 | Activate disabled skill → `40912` | Disabled activation is a user-facing skill error rather than internal `50001` |
+| Disabled-skill refresh parity | Plugin `sessionStart` skips disabled skills; runtime `/reload` neutralizes stale guidance; v2 refreshes system prompts/listings after every merged skill-catalog change; kap-server accepts `skill.disabled`; web refreshes loaded session/workspace menus with per-key stale-response guards |
 
 There is intentionally no fork-only `/api/v1/usages` route. The quota UI must continue to use the upstream OAuth usage endpoint.
 

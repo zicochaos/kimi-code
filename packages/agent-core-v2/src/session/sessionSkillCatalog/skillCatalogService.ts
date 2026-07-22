@@ -63,7 +63,7 @@ export class SessionSkillCatalogService
       this.config.onDidSectionChange((event) => {
         if (event.domain === DISABLED_SKILLS_SECTION) {
           this.remerge();
-          this.onDidChangeEmitter.fire('disabledSkills');
+          this.onDidChangeEmitter.fire(DISABLED_SKILLS_SECTION);
         }
       }),
     );
