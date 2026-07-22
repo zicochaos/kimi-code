@@ -63,7 +63,7 @@ import {
   type ProtocolProviderOptions,
 } from '#/kosong/protocol/protocol';
 
-import { IConfigService } from '../../app/config/config';
+import { ConfigTarget, IConfigService } from '../../app/config/config';
 import { ConfigErrors } from '../../app/config/errors';
 import {
   LATEST_OPUS_PROFILE,
@@ -280,7 +280,15 @@ export class ModelCatalog extends Disposable implements IModelCatalog {
     // Materialization gate: a model that cannot resolve (dangling provider
     // reference, conflicting credentials, ...) must not become the default.
     const model = this.get(modelId);
-    await this.config.set(DEFAULT_MODEL_SECTION, modelId);
+    // When persist_default_model is false, keep the switch process-local so a
+    // VCS/synced config.toml is not rewritten by /model (session-only default).
+    const persistDefaultModel =
+      this.config.get<boolean | undefined>('persistDefaultModel') !== false;
+    await this.config.set(
+      DEFAULT_MODEL_SECTION,
+      modelId,
+      persistDefaultModel ? ConfigTarget.User : ConfigTarget.Memory,
+    );
     return {
       default_model: modelId,
       model: toProtocolModel(model, record, this.providerTypeOf(record)),

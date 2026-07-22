@@ -14,17 +14,20 @@ import { resolveThinkingEffort } from '../agent/config/thinking';
 import { Agent } from '../agent';
 import { limitAgentReplayByTurns } from '../agent/replay/turns';
 import {
+  applyEnvModelConfig,
   applyPrintModeConfigDefaults,
   ensureKimiHome,
   loadRuntimeConfigSafe,
   mergeConfigPatch,
   migrateThinkingEffortMaxToHigh,
+  planConfigWrite,
   readConfigFileForUpdate,
   normalizeAdditionalDirs,
   readWorkspaceAdditionalDirs,
   resolveWorkspaceAdditionalDirs,
   resolveConfigPath,
   resolveKimiHome,
+  shouldPersistDefaultModel,
   writeConfigFile,
   type KimiConfig,
   type McpRemoteServerConfig,
@@ -667,8 +670,56 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }
 
   async setKimiConfig(input: SetKimiConfigPayload): Promise<KimiConfig> {
-    const config = mergeConfigPatch(this.readConfigForWrite(), input);
-    await writeConfigFile(this.configPath, config);
+    const disk = this.readConfigForWrite();
+    // When default model is session-only, later patches must not re-base on disk
+    // and drop the in-memory defaultModel/thinking. Freeze still uses `disk`.
+    // When disk already persists, base is disk (session overlay only needed when flag is off).
+    const base = shouldPersistDefaultModel(disk)
+      ? disk
+      : {
+          ...disk,
+          defaultModel: this.config.defaultModel,
+          thinking: this.config.thinking,
+        };
+    const merged = mergeConfigPatch(base, input);
+    // planConfigWrite decides persistence from effective (merged) flag; freeze source is disk.
+    const plan = planConfigWrite({ disk, patch: input, merged });
+
+    if (plan.write) {
+      await writeConfigFile(this.configPath, plan.configForDisk);
+    }
+
+    if (!plan.write) {
+      // Model-only session path: keep session model in memory; do NOT reload from disk.
+      // Preserve disk `raw` so future freezes still see original default_model.
+      // Use merged.persistDefaultModel (effective flag after patch).
+      const runtimeBase = {
+        ...merged,
+        raw: disk.raw ?? merged.raw,
+        persistDefaultModel: merged.persistDefaultModel,
+      };
+      return this.setRuntimeConfig(this.applyEnvModelConfigSafe(runtimeBase));
+    }
+
+    if (!shouldPersistDefaultModel(merged)) {
+      // Wrote frozen disk; keep session model/thinking + effective flag from merged.
+      // reloadRuntimeConfig alone would drop session defaultModel/thinking.
+      const loaded = loadRuntimeConfigSafe(this.configPath);
+      if (loaded.fileWarnings.length === 0) {
+        this.configWarnings = loaded.envWarnings;
+        const runtime = {
+          ...loaded.config,
+          defaultModel: merged.defaultModel,
+          thinking: merged.thinking,
+          persistDefaultModel: merged.persistDefaultModel,
+          raw: loaded.config.raw,
+        };
+        // loadRuntimeConfigSafe already applied env; re-apply safely so env still
+        // wins over session defaultModel when KIMI_MODEL_* is set (idempotent).
+        return this.setRuntimeConfig(this.applyEnvModelConfigSafe(runtime));
+      }
+    }
+
     return this.reloadRuntimeConfig();
   }
 
@@ -1270,6 +1321,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }
 
   private reloadRuntimeConfig(): KimiConfig {
+    const previous = this.config;
     const loaded = loadRuntimeConfigSafe(this.configPath);
     if (loaded.fileWarnings.length > 0) {
       // Keep the last good config: adopting a salvaged config mid-run could
@@ -1285,7 +1337,33 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       return this.config;
     }
     this.configWarnings = loaded.envWarnings;
-    return this.setRuntimeConfig(loaded.config);
+    let next = loaded.config;
+    // When session default model is not persisted (or was not), a reload from
+    // disk must not clobber the live session model — e.g. /model then
+    // refreshConfigAfterLogin → getKimiConfig({ reload: true }).
+    // loadRuntimeConfigSafe already applied env; previous.defaultModel is the
+    // env alias when KIMI_MODEL_* is active, so preserving it is correct.
+    if (!shouldPersistDefaultModel(previous) || !shouldPersistDefaultModel(next)) {
+      next = {
+        ...next,
+        defaultModel: previous.defaultModel,
+        thinking: previous.thinking,
+      };
+    }
+    return this.setRuntimeConfig(next);
+  }
+
+  /**
+   * Apply KIMI_MODEL_* env overlay without throwing. Mirrors the env branch of
+   * {@link loadRuntimeConfigSafe}: a bad overlay is skipped instead of aborting
+   * a successful setKimiConfig that already wrote disk / updated session state.
+   */
+  private applyEnvModelConfigSafe(config: KimiConfig): KimiConfig {
+    try {
+      return applyEnvModelConfig(config, process.env);
+    } catch {
+      return config;
+    }
   }
 
   private setRuntimeConfig(config: KimiConfig): KimiConfig {

@@ -18,13 +18,13 @@
  *    `notifyConfigChanged()` (the load-bearing test-harness contract).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createScopedTestHost } from '#/_base/di/test';
 import { isErrorCode } from '#/_base/errors/codes';
 import { isError2 } from '#/_base/errors/errors';
 import { IOAuthService } from '#/app/auth/auth';
-import { IConfigService } from '#/app/config/config';
+import { ConfigTarget, IConfigService } from '#/app/config/config';
 import { ConfigErrors } from '#/app/config/errors';
 import { UNKNOWN_CAPABILITY } from '#/kosong/contract/capability';
 import type { ChatProvider } from '#/kosong/contract/provider';
@@ -1241,6 +1241,7 @@ describe('ModelCatalog setDefaultModel', () => {
   it('persists through config and returns the wire model', async () => {
     const { host, config, catalog } = createHost(catalogSections);
     try {
+      const setSpy = vi.spyOn(config, 'set');
       await expect(catalog.setDefaultModel('turbo')).resolves.toEqual({
         default_model: 'turbo',
         model: {
@@ -1250,6 +1251,24 @@ describe('ModelCatalog setDefaultModel', () => {
           max_context_size: 32768,
         },
       });
+      expect(config.get<string>('defaultModel')).toBe('turbo');
+      expect(setSpy).toHaveBeenCalledWith('defaultModel', 'turbo', ConfigTarget.User);
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it('keeps setDefaultModel in memory when persist_default_model is false', async () => {
+    const { host, config, catalog } = createHost({
+      ...catalogSections,
+      persistDefaultModel: false,
+    });
+    try {
+      const setSpy = vi.spyOn(config, 'set');
+      await expect(catalog.setDefaultModel('turbo')).resolves.toMatchObject({
+        default_model: 'turbo',
+      });
+      expect(setSpy).toHaveBeenCalledWith('defaultModel', 'turbo', ConfigTarget.Memory);
       expect(config.get<string>('defaultModel')).toBe('turbo');
     } finally {
       host.dispose();

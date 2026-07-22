@@ -98,6 +98,7 @@ timeout = 5
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `default_model` | `string` | — | 默认模型别名，必须在 `models` 中定义 |
+| `persist_default_model` | `boolean` | `true` | 设为 `false` 时，`/model` 与默认模型 API 更新仅对当前进程生效，不会回写 `config.toml` 里的 `default_model` 或 `thinking`。适用于 `config.toml` 由同步或版本控制来源管理的场景（例如 Dotter 软链接）。其他配置写入仍正常持久化 |
 | `default_permission_mode` | `string` | `manual` | 新会话的默认权限模式，可选 `manual`（逐次询问）、`yolo`（自动批准工具操作，Agent 仍可能提问）、`auto`（完全自主，Agent 自己做决定，不再提问） |
 | `default_plan_mode` | `boolean` | `false` | 新会话是否默认以 Plan 模式（先出计划再执行）启动 |
 | `merge_all_available_skills` | `boolean` | `true` | 是否合并所有目录中的 Agent Skills |
