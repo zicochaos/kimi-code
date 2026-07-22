@@ -115,8 +115,8 @@ describe('AgentSkillService', () => {
   });
 
   it('activate throws for skills listed in disabled_skills config', async () => {
-    const disabledCatalog = new InMemorySkillCatalog({ disabledSkills: ['grok-delegation'] });
-    disabledCatalog.register(stubSkill('grok-delegation'));
+    const disabledCatalog = new InMemorySkillCatalog({ disabledSkills: ['review-helper'] });
+    disabledCatalog.register(stubSkill('review-helper'));
     ix.set(ISessionSkillCatalog, {
       _serviceBrand: undefined,
       catalog: disabledCatalog,
@@ -128,7 +128,7 @@ describe('AgentSkillService', () => {
     ix.set(IAgentSkillService, new SyncDescriptor(AgentSkillService));
 
     const svc = ix.get(IAgentSkillService);
-    await expect(svc.activate({ name: 'grok-delegation' })).rejects.toThrow(
+    await expect(svc.activate({ name: 'review-helper' })).rejects.toThrow(
       /disabled in configuration \(disabled_skills\)/i,
     );
   });
@@ -287,8 +287,8 @@ describe('SkillTool', () => {
   });
 
   it('rejects skills listed in disabled_skills config', async () => {
-    const disabledCatalog = new InMemorySkillCatalog({ disabledSkills: ['grok-delegation'] });
-    disabledCatalog.register(stubSkill('grok-delegation'));
+    const disabledCatalog = new InMemorySkillCatalog({ disabledSkills: ['review-helper'] });
+    disabledCatalog.register(stubSkill('review-helper'));
     ix.set(ISessionSkillCatalog, {
       _serviceBrand: undefined,
       catalog: disabledCatalog,
@@ -300,12 +300,12 @@ describe('SkillTool', () => {
 
     const result = await executeTool(
       makeTool(ix),
-      toolContext({ skill: 'grok-delegation' }),
+      toolContext({ skill: 'review-helper' }),
     );
 
     expect(result).toMatchObject({
       isError: true,
-      output: 'Skill "grok-delegation" is disabled in configuration (disabled_skills).',
+      output: 'Skill "review-helper" is disabled in configuration (disabled_skills).',
     });
   });
 
