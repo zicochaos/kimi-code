@@ -99,6 +99,7 @@ Fields in the config file fall into two categories: **top-level scalars** that d
 | --- | --- | --- | --- |
 | `default_model` | `string` | — | Default model alias; must be defined in `models` |
 | `persist_default_model` | `boolean` | `true` | When `false`, `/model` and default-model API updates apply only for the current process and do not rewrite `default_model` or `thinking` in `config.toml`. Use this when `config.toml` is managed by a synced/VCS-tracked source (for example a Dotter symlink). Other config writes still persist normally |
+| `agents_md_expand_includes` | `boolean` | `false` | When `true`, lines of the form `@path` inside AGENTS.md files are replaced with the target file contents at session start (absolute paths, or paths relative to that AGENTS.md). Nested includes are supported; missing or circular includes become HTML comments. Off by default so managed instruction files stay literal |
 | `default_permission_mode` | `string` | `manual` | Default permission mode for new sessions; one of `manual` (prompt each time), `yolo` (auto-approve tool actions, but the agent may still ask questions), or `auto` (fully autonomous — the agent decides everything without asking) |
 | `default_plan_mode` | `boolean` | `false` | Whether new sessions start in Plan mode (produce a plan before executing) by default |
 | `merge_all_available_skills` | `boolean` | `true` | Whether to merge Agent Skills from all available directories |

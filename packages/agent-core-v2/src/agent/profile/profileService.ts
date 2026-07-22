@@ -86,6 +86,7 @@ import { IAgentTelemetryContextService } from '#/app/telemetry/agentTelemetryCon
 import { IWireService } from '#/wire/wire';
 import type { PayloadOf } from '#/wire/types';
 import { IEventBus } from '#/app/event/eventBus';
+import { AGENTS_MD_EXPAND_INCLUDES_SECTION } from './configSection';
 import { prepareSystemPromptContext } from './context';
 import type {
   ApplyProfileOptions,
@@ -778,11 +779,16 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     options?: ApplyProfileOptions,
   ): Promise<SystemPromptContext> {
     const effectiveCwd = cwd ?? this.sessionContext.cwd;
+    const expandIncludes =
+      this.config.get<boolean | undefined>(AGENTS_MD_EXPAND_INCLUDES_SECTION) === true;
     const base = await prepareSystemPromptContext(
       { fs: this.fs, homeDir: this.env.homeDir },
       effectiveCwd,
       this.bootstrap.homeDir,
-      { additionalDirs: options?.additionalDirs ?? this.workspace.additionalDirs },
+      {
+        additionalDirs: options?.additionalDirs ?? this.workspace.additionalDirs,
+        expandIncludes,
+      },
     );
     const skills = await this.resolveSkillListing();
     return {

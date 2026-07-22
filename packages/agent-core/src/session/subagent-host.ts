@@ -458,7 +458,10 @@ export class SessionSubagentHost {
     const context = await prepareSystemPromptContext(
       this.session.systemContextKaos(child.kaos.getcwd()),
       this.session.options.kimiHomeDir,
-      { additionalDirs: child.getAdditionalDirs() },
+      {
+        additionalDirs: child.getAdditionalDirs(),
+        expandIncludes: this.session.options.config?.agentsMdExpandIncludes === true,
+      },
     );
     child.useProfile(profile, context, this.session.options.kimiHomeDir);
     child.tools.inheritUserTools(parent.tools);

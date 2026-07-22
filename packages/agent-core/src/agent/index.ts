@@ -451,6 +451,7 @@ export class Agent {
     const context = this.systemPromptContextProvider === undefined
       ? await prepareSystemPromptContext(this.kaos, this.brandHome, {
           additionalDirs: this.additionalDirs,
+          expandIncludes: this.kimiConfig?.agentsMdExpandIncludes === true,
         })
       : await this.systemPromptContextProvider();
     this.updateSystemPromptFromProfile(this.activeProfile, context);

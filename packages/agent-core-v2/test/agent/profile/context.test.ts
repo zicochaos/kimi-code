@@ -185,6 +185,68 @@ describe('loadAgentsMd oversized content', () => {
   });
 });
 
+describe('loadAgentsMd expandIncludes', () => {
+  it('leaves @path lines as text when expandIncludes is off', async () => {
+    const rulesDir = await mkdtemp(join(tmpdir(), 'kimi-agents-rules-'));
+    extraDirs.push(rulesDir);
+    await writeFile(join(rulesDir, 'python.md'), 'python rule body', 'utf-8');
+    await writeFile(join(workDir, 'AGENTS.md'), `@${join(rulesDir, 'python.md')}\nlocal instructions\n`, 'utf-8');
+
+    const result = await loadAgentsMd({ fs, homeDir }, workDir);
+
+    expect(result).toContain(`@${join(rulesDir, 'python.md')}`);
+    expect(result).not.toContain('python rule body');
+    expect(result).toContain('local instructions');
+  });
+
+  it('inlines absolute and relative @path includes when expandIncludes is true', async () => {
+    const rulesDir = await mkdtemp(join(tmpdir(), 'kimi-agents-rules-'));
+    extraDirs.push(rulesDir);
+    await writeFile(join(rulesDir, 'python.md'), 'python rule body', 'utf-8');
+    await writeFile(join(workDir, 'relative-rule.md'), 'relative rule body', 'utf-8');
+    await writeFile(
+      join(workDir, 'AGENTS.md'),
+      [`@${join(rulesDir, 'python.md')}`, '@relative-rule.md', 'local instructions'].join('\n'),
+      'utf-8',
+    );
+
+    const result = await loadAgentsMd({ fs, homeDir }, workDir, undefined, {
+      expandIncludes: true,
+    });
+
+    expect(result).toContain('python rule body');
+    expect(result).toContain('relative rule body');
+    expect(result).toContain('local instructions');
+    expect(result).toContain('<!-- Include:');
+    expect(result).not.toMatch(/^@/m);
+  });
+
+  it('marks missing includes without dropping the rest of the file', async () => {
+    await writeFile(join(workDir, 'AGENTS.md'), '@missing-rule.md\nkeep me\n', 'utf-8');
+
+    const result = await loadAgentsMd({ fs, homeDir }, workDir, undefined, {
+      expandIncludes: true,
+    });
+
+    expect(result).toContain('<!-- missing include: missing-rule.md -->');
+    expect(result).toContain('keep me');
+  });
+
+  it('breaks include cycles with a marker', async () => {
+    await writeFile(join(workDir, 'a.md'), '@b.md\nfrom a\n', 'utf-8');
+    await writeFile(join(workDir, 'b.md'), '@a.md\nfrom b\n', 'utf-8');
+    await writeFile(join(workDir, 'AGENTS.md'), '@a.md\n', 'utf-8');
+
+    const result = await loadAgentsMd({ fs, homeDir }, workDir, undefined, {
+      expandIncludes: true,
+    });
+
+    expect(result).toContain('from a');
+    expect(result).toContain('from b');
+    expect(result).toContain('<!-- circular include: a.md -->');
+  });
+});
+
 describe('prepareSystemPromptContext AGENTS.md size warning', () => {
   it('returns agentsMdWarning and keeps full content when oversized', async () => {
     const brandHome = await mkdtemp(join(tmpdir(), 'kimi-agents-brand-'));
