@@ -20,6 +20,8 @@ import { IAgentContextSizeService } from '#/agent/contextSize/contextSize';
 import { makeHookRunner } from '../agent/externalHooks/runner-stub';
 import { IAgentProfileService } from '#/agent/profile/profile';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
+import { IAgentPermissionPolicyService } from '#/agent/permissionPolicy/permissionPolicy';
+import type { ResolvedToolExecutionHookContext } from '#/agent/toolExecutor/toolHooks';
 import { ToolAccesses, type ExecutableTool } from '#/tool/toolContract';
 import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { IAgentLoopService } from '#/agent/loop/loop';
@@ -66,6 +68,7 @@ import {
   execEnvServices,
   externalHookServices,
   homeDirServices,
+  permissionRulesServices,
   sessionService,
   swarmServices,
   type TestAgentContext,
@@ -889,6 +892,65 @@ describe('Agent tool execution contract', () => {
         },
       }),
     );
+  });
+
+  it('matches the semantic profile permission rule while displaying an alternate model', async () => {
+    const lifecycle = createAgentLifecycleStub();
+    const context = createAgentToolContext(
+      lifecycle,
+      permissionRulesServices([
+        { decision: 'allow', scope: 'user', pattern: 'Agent(explore)' },
+      ]),
+      appService(IFlagService, stubFlag((id) => id === 'subagent-model-selection')),
+      {
+        initialConfig: {
+          models: {
+            alternate: {
+              provider: 'test-provider',
+              model: 'alternate-wire',
+              maxContextSize: 123_000,
+            },
+          },
+        },
+      },
+    );
+    const args: AgentToolInput = {
+      prompt: 'Investigate',
+      description: 'Find cause',
+      subagent_type: 'explore',
+      model: 'alternate',
+    };
+    const tool = agentTool(context);
+    const execution = await tool.resolveExecution(args);
+    if (execution.isError === true) throw new Error('expected runnable execution');
+    const toolCall: ToolCall = {
+      type: 'function',
+      id: 'call_agent',
+      name: 'Agent',
+      arguments: JSON.stringify(args),
+    };
+    const policyContext: ResolvedToolExecutionHookContext = {
+      turnId: 0,
+      signal,
+      toolCall,
+      toolCalls: [toolCall],
+      tool,
+      args,
+      execution,
+    };
+
+    expect(execution.matchesRule?.('explore')).toBe(true);
+    expect(execution.description).toContain('explore · model alternate');
+    expect(execution.display).toMatchObject({
+      kind: 'agent_call',
+      agent_name: 'explore · model alternate',
+    });
+    await expect(
+      context.get(IAgentPermissionPolicyService).evaluate(policyContext),
+    ).resolves.toMatchObject({
+      policyName: 'user-configured-allow',
+      result: { kind: 'approve' },
+    });
   });
 
   it('spawns a foreground subagent and returns its summary', async () => {

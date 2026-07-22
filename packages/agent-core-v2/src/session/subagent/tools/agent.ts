@@ -273,19 +273,19 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       resumeAgentId !== undefined && resumeAgentId.length > 0
         ? this.resumeProfileName(resumeAgentId) ?? RESUMED_LABEL
         : requestedProfileName ?? DEFAULT_PROFILE_NAME;
-    const approvalAgentName = subagentApprovalAgentName(profileNameForDisplay, modelAlias);
+    const displayAgentName = subagentApprovalAgentName(profileNameForDisplay, modelAlias);
     const prefix = args.run_in_background === true ? 'Launching background' : 'Launching';
     return {
-      description: `${prefix} ${approvalAgentName} agent: ${args.description}`,
+      description: `${prefix} ${displayAgentName} agent: ${args.description}`,
       accesses: ToolAccesses.none(),
       display: {
         kind: 'agent_call',
-        agent_name: approvalAgentName,
+        agent_name: displayAgentName,
         prompt: args.prompt,
         background: args.run_in_background,
       },
       approvalRule: this.name,
-      matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, approvalAgentName),
+      matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, profileNameForDisplay),
       execute: (ctx) => this.execution(args, ctx, modelAlias, modelSelectionEnabled),
     };
   }

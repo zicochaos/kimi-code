@@ -306,5 +306,5 @@ function tokenizeArgs(raw: string): string[] {
 }
 
 function escapeRegExp(value: string): string {
-  return value.replaceAll(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
 }

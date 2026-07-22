@@ -39,6 +39,7 @@ interface StartupDriver {
   init(): Promise<boolean>;
   handleLoginCommand(): Promise<void>;
   handleLogoutCommand(): Promise<void>;
+  setAppState(patch: Partial<TUIState['appState']>): void;
   stop(exitCode?: number): Promise<void>;
 }
 
@@ -221,6 +222,120 @@ function makeDriver(harness: ReturnType<typeof makeHarness>, input: KimiTUIStart
   vi.spyOn(driver.state.terminal, 'setProgress').mockImplementation(() => {});
   return driver;
 }
+
+function deferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void } {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((onResolve) => {
+    resolve = onResolve;
+  });
+  return { promise, resolve };
+}
+
+describe('KimiTUI managed usage runtime', () => {
+  it('refreshes quota when the active alias resolves from a custom provider to managed', async () => {
+    const usage = {
+      kind: 'ok' as const,
+      summary: { label: '1w limit', used: 12, limit: 100 },
+      limits: [{ label: '5h limit', used: 40, limit: 100 }],
+      extraUsage: null,
+    };
+    const getManagedUsage = vi.fn(async () => usage);
+    const harness = makeHarness(makeSession(), {
+      auth: {
+        status: vi.fn(async () => ({ providers: [] })),
+        login: vi.fn(async () => {}),
+        logout: vi.fn(),
+        getManagedUsage,
+      },
+    });
+    const driver = makeDriver(harness, makeStartupInput());
+    driver.setAppState({
+      model: 'same-alias',
+      availableModels: {
+        'same-alias': {
+          provider: 'custom',
+          model: 'custom-wire',
+          maxContextSize: 100,
+        },
+      },
+    });
+
+    driver.setAppState({
+      availableModels: {
+        'same-alias': {
+          provider: 'managed:kimi-code',
+          model: 'managed-wire',
+          maxContextSize: 100,
+        },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(getManagedUsage).toHaveBeenCalledWith('managed:kimi-code');
+      expect(driver.state.appState.managedUsage).toEqual({
+        summary: usage.summary,
+        limits: usage.limits,
+        extraUsage: null,
+      });
+    });
+  });
+
+  it('clears quota and drops a delayed response when the active alias resolves to custom', async () => {
+    const pending = deferred<{
+      readonly kind: 'ok';
+      readonly summary: { readonly label: string; readonly used: number; readonly limit: number };
+      readonly limits: readonly [];
+      readonly extraUsage: null;
+    }>();
+    const getManagedUsage = vi.fn(() => pending.promise);
+    const harness = makeHarness(makeSession(), {
+      auth: {
+        status: vi.fn(async () => ({ providers: [] })),
+        login: vi.fn(async () => {}),
+        logout: vi.fn(),
+        getManagedUsage,
+      },
+    });
+    const driver = makeDriver(harness, makeStartupInput());
+    driver.setAppState({
+      model: 'same-alias',
+      availableModels: {
+        'same-alias': {
+          provider: 'managed:kimi-code',
+          model: 'managed-wire',
+          maxContextSize: 100,
+        },
+      },
+      managedUsage: {
+        summary: { label: 'old limit', used: 90, limit: 100 },
+        limits: [],
+        extraUsage: null,
+      },
+    });
+    expect(getManagedUsage).toHaveBeenCalledOnce();
+
+    driver.setAppState({
+      availableModels: {
+        'same-alias': {
+          provider: 'custom',
+          model: 'custom-wire',
+          maxContextSize: 100,
+        },
+      },
+    });
+    pending.resolve({
+      kind: 'ok',
+      summary: { label: 'stale limit', used: 10, limit: 100 },
+      limits: [],
+      extraUsage: null,
+    });
+    await pending.promise;
+    await Promise.resolve();
+
+    expect(driver.state.appState.managedUsage).toBeUndefined();
+    expect(driver.state.appState.managedUsageError).toBeNull();
+  });
+});
 
 type InputListener = Parameters<TUIState['ui']['addInputListener']>[0];
 const DARK_OSC11_REPORT = '\u001B]11;rgb:2828/2c2c/3434\u0007';

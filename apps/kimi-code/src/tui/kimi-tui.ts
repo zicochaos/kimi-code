@@ -1488,7 +1488,12 @@ export class KimiTUI {
       !sameStringArrays(this.state.appState.additionalDirs, patch.additionalDirs ?? []);
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
     const modelChanged = 'model' in patch && patch.model !== this.state.appState.model;
+    const previousProvider =
+      this.state.appState.availableModels[this.state.appState.model]?.provider;
     Object.assign(this.state.appState, patch);
+    const providerChanged =
+      previousProvider !==
+      this.state.appState.availableModels[this.state.appState.model]?.provider;
     if ('planMode' in patch) this.updateEditorBorderHighlight();
     this.state.footer.setState(this.state.appState);
     this.updateActivityPane();
@@ -1497,9 +1502,9 @@ export class KimiTUI {
       this.sessionEventHandler.retryQueuedGoalPromotion();
     }
     if (additionalDirsChanged) this.setupAutocomplete();
-    // Model switch (picker, login, logout, resume) must refresh / clear quota
-    // immediately so the footer never shows another provider's numbers.
-    if (modelChanged) void this.refreshManagedUsage();
+    // Model or resolved-provider switch (picker, reload, login, logout, resume)
+    // must refresh / clear quota immediately so stale numbers never leak.
+    if (modelChanged || providerChanged) void this.refreshManagedUsage();
     this.state.ui.requestRender();
   }
 
