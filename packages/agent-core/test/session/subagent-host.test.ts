@@ -328,6 +328,7 @@ describe('SessionSubagentHost', () => {
           subagentName: 'explore',
           parentAgentId: 'main',
           parentToolCallId: 'call_agent',
+          model: 'mock-model',
         }),
       }),
     );
@@ -1169,6 +1170,15 @@ describe('SessionSubagentHost', () => {
     // than leave it on the stale model from its initial spawn.
     expect(child.agent.config.modelAlias).toBe(parent.agent.config.modelAlias);
     expect(child.agent.config.modelAlias).not.toBe('stale-model-from-initial-spawn');
+    expect(parent.allEvents).toContainEqual(
+      expect.objectContaining({
+        type: '[rpc]',
+        event: 'subagent.spawned',
+        args: expect.objectContaining({
+          model: parent.agent.config.modelAlias,
+        }),
+      }),
+    );
   });
 });
 

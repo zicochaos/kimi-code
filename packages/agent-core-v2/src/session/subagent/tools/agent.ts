@@ -375,12 +375,15 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     let agentId: string;
     let profileName: string;
     let promptText = args.prompt;
+    let effectiveModelAlias: string | undefined;
     if (isResume) {
       const target = this.lifecycle.get(resumeAgentId);
       if (target === undefined) {
         throw new Error(`Agent instance "${resumeAgentId}" does not exist`);
       }
       await this.ensureOwnedIdleSubagent(resumeAgentId, target);
+      // Resume keeps the child's bound model; surface that alias.
+      effectiveModelAlias = target.accessor.get(IAgentProfileService).data().modelAlias;
       agentId = target.id;
       profileName =
         target.accessor.get(IAgentProfileService).data().profileName ?? RESUMED_LABEL;
@@ -412,6 +415,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         args.model,
         profile.modelPreference,
       );
+      effectiveModelAlias = binding.model;
       let created: IAgentScopeHandle;
       try {
         this.modelCatalog.get(binding.model);
@@ -446,6 +450,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       parentToolCallId: toolCallId,
       description: args.description,
       runInBackground,
+      model: effectiveModelAlias,
     });
 
     const run = await this.subagents.run(

@@ -1315,6 +1315,7 @@ describe('Agent tool execution contract', () => {
       profileName: 'explore',
       parentToolCallId: 'call_agent',
       runInBackground: false,
+      model: 'local/gpt-5.6-sol',
     });
     await mirrorAgentRun(
       requester,
@@ -1333,6 +1334,7 @@ describe('Agent tool execution contract', () => {
     expect(events.find((event) => event.type === 'subagent.spawned')).toMatchObject({
       parentAgentId: 'main',
       callerAgentId: 'main',
+      model: 'local/gpt-5.6-sol',
     });
     expect(telemetryRecords).toContainEqual({
       event: 'subagent_created',

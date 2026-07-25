@@ -163,7 +163,7 @@ export class SessionSubagentHost {
       { parentAgentId: this.ownerAgentId, swarmItem: options.swarmItem },
     );
     const completion = this.runWithActiveChild(id, options, async (runOptions) => {
-      this.emitSubagentSpawned(parent, id, profile.name, runOptions);
+      this.emitSubagentSpawned(parent, id, profile.name, runOptions, modelAlias);
       try {
         await this.configureChild(parent, agent, profile, modelAlias);
         return await this.runPromptTurn(parent, id, agent, profile.name, runOptions);
@@ -184,7 +184,8 @@ export class SessionSubagentHost {
     options.signal.throwIfAborted();
     const { parent, child, profileName } = await this.ensureIdleSubagent(agentId);
     const completion = this.runWithActiveChild(agentId, options, async (runOptions) => {
-      this.emitSubagentSpawned(parent, agentId, profileName, runOptions);
+      // resume realigns the child to the parent model; emit that effective alias.
+      this.emitSubagentSpawned(parent, agentId, profileName, runOptions, parent.config.modelAlias);
       try {
         child.config.update({ modelAlias: parent.config.modelAlias });
         return await this.runPromptTurn(parent, agentId, child, profileName, runOptions);
@@ -524,6 +525,7 @@ export class SessionSubagentHost {
     childId: string,
     profileName: string,
     options: RunSubagentOptions,
+    modelAlias?: string,
   ): void {
     parent.emitEvent({
       type: 'subagent.spawned',
@@ -535,6 +537,7 @@ export class SessionSubagentHost {
       description: options.description,
       swarmIndex: options.swarmIndex,
       runInBackground: options.runInBackground,
+      model: modelAlias,
     });
     parent.telemetry.track('subagent_created', {
       agent_id: childId,

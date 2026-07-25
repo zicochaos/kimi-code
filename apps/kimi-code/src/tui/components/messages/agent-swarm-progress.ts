@@ -113,6 +113,7 @@ interface AgentSwarmMember {
   ticks: number;
   itemText: string;
   latestModelText: string;
+  model?: string;
   completedText?: string;
   failureText?: string;
   cancelledLabelText?: string;
@@ -290,10 +291,12 @@ export class AgentSwarmProgressComponent implements Component {
     readonly agentId: string;
     readonly swarmIndex?: number;
     readonly description?: string | undefined;
+    readonly model?: string | undefined;
   }): void {
     const member = this.findMemberForSubagent(input.agentId, input.swarmIndex);
     if (member === undefined) return;
     member.agentId = input.agentId;
+    if (input.model !== undefined) member.model = input.model;
     if (member.phase === 'pending') member.phase = 'queued';
     this.startAnimationIfNeeded();
   }
@@ -481,12 +484,37 @@ export class AgentSwarmProgressComponent implements Component {
       this.description.length > 0
         ? chalk.hex(this.colors.primary)(' ─ ') + chalk.hex(this.colors.text)(this.description)
         : '';
+    const sharedModel = this.sharedMemberModel();
+    const modelLabel =
+      sharedModel !== undefined
+        ? chalk.hex(this.colors.primary)(' ─ ') + chalk.hex(this.colors.textDim)(sharedModel)
+        : '';
     const prefixText = '─ ';
     const labelWidth = Math.max(1, width - visibleWidth(prefixText) - 1);
-    const label = truncateToWidth(title + description, labelWidth);
+    const label = truncateToWidth(title + description + modelLabel, labelWidth);
     const suffixWidth = Math.max(0, width - visibleWidth(prefixText) - visibleWidth(label));
     const suffix = suffixWidth === 0 ? '' : ` ${'─'.repeat(Math.max(0, suffixWidth - 1))}`;
     return chalk.hex(this.colors.primary)(prefixText) + label + chalk.hex(this.colors.primary)(suffix);
+  }
+
+  /**
+   * Returns the model alias shared by every member that has one, or undefined
+   * when members have no model or disagree. Used to surface the swarm's model
+   * in the header without per-member clutter.
+   */
+  private sharedMemberModel(): string | undefined {
+    let shared: string | undefined;
+    let seen = false;
+    for (const member of this.members) {
+      if (member.model === undefined) continue;
+      if (!seen) {
+        shared = member.model;
+        seen = true;
+      } else if (member.model !== shared) {
+        return undefined;
+      }
+    }
+    return seen ? shared : undefined;
   }
 
   private renderStatusLine(width: number): string {

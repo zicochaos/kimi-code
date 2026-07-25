@@ -167,6 +167,29 @@ describe('AgentSwarmProgressComponent', () => {
     expect(output).not.toContain('01');
   });
 
+  it('shows the shared model in the header when members share one', () => {
+    const component = createComponent();
+    component.registerSubagent({ agentId: 'agent-1', model: 'example/model-a' });
+    component.registerSubagent({ agentId: 'agent-2', model: 'example/model-a' });
+
+    const output = renderText(component);
+
+    expect(output).toContain('Agent Swarm');
+    expect(output).toContain('example/model-a');
+  });
+
+  it('omits the model from the header when members disagree', () => {
+    const component = createComponent();
+    component.registerSubagent({ agentId: 'agent-1', model: 'example/model-a' });
+    component.registerSubagent({ agentId: 'agent-2', model: 'example/model-b' });
+
+    const output = renderText(component);
+
+    expect(output).toContain('Agent Swarm');
+    expect(output).not.toContain('example/model-a');
+    expect(output).not.toContain('example/model-b');
+  });
+
   it('repaints from the active palette when the theme changes', () => {
     const previousLevel = chalk.level;
     chalk.level = 3; // force truecolor so palette differences surface as ANSI
