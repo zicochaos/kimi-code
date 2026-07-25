@@ -208,6 +208,78 @@ describe('DaemonKimiWebApi.getSessionGoal', () => {
   });
 });
 
+describe('DaemonKimiWebApi.getManagedUsage', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('maps the snake_case oauth usage payload to camelCase app shape', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      envelope({
+        kind: 'ok',
+        summary: {
+          label: 'Weekly limit',
+          used: 40,
+          limit: 1000,
+          reset_hint: 'resets in 2d',
+        },
+        limits: [{ label: '5h limit', used: 1, limit: 100 }],
+        extra_usage: {
+          balance_cents: 500,
+          total_cents: 1000,
+          monthly_charge_limit_enabled: true,
+          monthly_charge_limit_cents: 2000,
+          monthly_used_cents: 1500,
+          currency: 'CNY',
+        },
+      }),
+    );
+
+    const result = await createApi().getManagedUsage('managed:kimi-code');
+
+    expect(result).toEqual({
+      kind: 'ok',
+      summary: {
+        label: 'Weekly limit',
+        used: 40,
+        limit: 1000,
+        resetHint: 'resets in 2d',
+      },
+      limits: [{ label: '5h limit', used: 1, limit: 100 }],
+      extraUsage: {
+        balanceCents: 500,
+        totalCents: 1000,
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimitCents: 2000,
+        monthlyUsedCents: 1500,
+        currency: 'CNY',
+      },
+    });
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+      'http://daemon.test/api/v1/oauth/usage?provider=managed%3Akimi-code',
+    );
+  });
+
+  it('passes through the error payload with optional status', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      envelope({ kind: 'error', message: 'Authorization failed.', status: 401 }),
+    );
+    const result = await createApi().getManagedUsage();
+    expect(result).toEqual({
+      kind: 'error',
+      message: 'Authorization failed.',
+      status: 401,
+    });
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+      'http://daemon.test/api/v1/oauth/usage',
+    );
+  });
+});
+
 describe('DaemonKimiWebApi.connectEvents', () => {
   let connection: KimiEventConnection | undefined;
 
