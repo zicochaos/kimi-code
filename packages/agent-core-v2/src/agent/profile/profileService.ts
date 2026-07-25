@@ -790,7 +790,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     const expandIncludes =
       this.config.get<AgentsMdExpandIncludes>(AGENTS_MD_EXPAND_INCLUDES_SECTION) === true;
     const base = await prepareSystemPromptContext(
-      { fs: this.fs, homeDir: this.env.homeDir },
+      { fs: this.fs, homeDir: this.env.homeDir, pathClass: this.env.pathClass },
       effectiveCwd,
       this.bootstrap.homeDir,
       {

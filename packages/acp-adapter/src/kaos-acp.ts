@@ -93,6 +93,10 @@ export class AcpKaos implements Kaos {
     return new AcpKaos(this.conn, this.sessionId, this.inner.withEnv(env));
   }
 
+  realpath(path: string): Promise<string> {
+    return this.inner.realpath(path);
+  }
+
   stat(path: string, options?: { followSymlinks?: boolean }): Promise<StatResult> {
     return this.inner.stat(path, options);
   }

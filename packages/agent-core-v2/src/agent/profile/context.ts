@@ -16,8 +16,11 @@
  * truncating.
  */
 
+import { posix, win32 } from 'node:path';
+
 import { dirname, isAbsolute, join, normalize } from 'pathe';
 
+import type { PathClass } from '#/os/interface/hostEnvironment';
 import type { IHostFileSystem } from '#/os/interface/hostFileSystem';
 
 import type { SystemPromptContext } from './profile';
@@ -32,6 +35,7 @@ export const LIST_DIR_CHILD_WIDTH = 10;
 interface ProfileContextDeps {
   readonly fs: IHostFileSystem;
   readonly homeDir: string;
+  readonly pathClass: PathClass;
 }
 
 export interface PreparedSystemPromptContext extends SystemPromptContext {
@@ -44,8 +48,9 @@ export interface PreparedSystemPromptContext extends SystemPromptContext {
 export interface PrepareSystemPromptContextOptions {
   readonly additionalDirs?: readonly string[];
   /**
-   * When true, expand `@path` include directives inside AGENTS.md files
-   * (absolute or relative to the including file). Default / absent = false.
+   * When true, expand `@path` include directives inside AGENTS.md files.
+   * Project-level targets stay confined to the project root after realpath;
+   * trusted user-level files may use absolute targets. Default / absent = false.
    */
   readonly expandIncludes?: boolean;
 }
@@ -104,14 +109,14 @@ async function loadAgentsMdForRoots(
     loadWarnings.push(message);
   };
 
-  const collect = async (path: string): Promise<boolean> => {
+  const collect = async (path: string, projectRoot?: string): Promise<boolean> => {
     const file = await readAgentFile(deps, path, warnLoad);
     if (file === undefined) return false;
     const key = normalize(file.path);
     if (seen.has(key)) return false;
     seen.add(key);
     const content = expandIncludes
-      ? await expandAgentsMdIncludes(deps, file.content, file.path)
+      ? await expandAgentsMdIncludes(deps, file.content, file.path, projectRoot)
       : file.content;
     discovered.push({ path: file.path, content });
     return true;
@@ -135,9 +140,9 @@ async function loadAgentsMdForRoots(
     const dirs = dirsRootToLeaf(rootWorkDir, projectRoot);
 
     for (const dir of dirs) {
-      await collect(join(dir, '.kimi-code', 'AGENTS.md'));
+      await collect(join(dir, '.kimi-code', 'AGENTS.md'), projectRoot);
       for (const fileName of ['AGENTS.md', 'agents.md']) {
-        if (await collect(join(dir, fileName))) break;
+        if (await collect(join(dir, fileName), projectRoot)) break;
       }
     }
   }
@@ -232,12 +237,14 @@ export async function expandAgentsMdIncludes(
   deps: ProfileContextDeps,
   content: string,
   sourcePath: string,
+  projectRoot?: string,
   stack: Set<string> = new Set(),
   depth = 0,
 ): Promise<string> {
   if (depth >= AGENTS_MD_INCLUDE_MAX_DEPTH) return content;
 
   const baseDir = dirname(sourcePath);
+  const realProjectRoot = projectRoot === undefined ? undefined : await deps.fs.realpath(projectRoot);
   const lines = content.split('\n');
   const out: string[] = [];
 
@@ -250,19 +257,32 @@ export async function expandAgentsMdIncludes(
 
     const raw = match[1] ?? '';
     const target = isAbsolute(raw) ? raw : join(baseDir, raw);
-    const key = normalize(target);
+    let key: string;
+    try {
+      key = await deps.fs.realpath(target);
+    } catch {
+      out.push(`<!-- missing include: ${raw} -->`);
+      continue;
+    }
+    if (
+      realProjectRoot !== undefined &&
+      !isInsideOrEqual(key, realProjectRoot, deps.pathClass)
+    ) {
+      out.push(`<!-- blocked include: ${raw} -->`);
+      continue;
+    }
     if (stack.has(key)) {
       out.push(`<!-- circular include: ${raw} -->`);
       continue;
     }
-    if (!(await isFile(deps, target))) {
+    if (!(await isFile(deps, key))) {
       out.push(`<!-- missing include: ${raw} -->`);
       continue;
     }
 
     let included: string;
     try {
-      included = (await deps.fs.readText(target, { errors: 'ignore' })).trim();
+      included = (await deps.fs.readText(key, { errors: 'ignore' })).trim();
     } catch {
       out.push(`<!-- missing include: ${raw} -->`);
       continue;
@@ -273,13 +293,28 @@ export async function expandAgentsMdIncludes(
     }
 
     stack.add(key);
-    const expanded = await expandAgentsMdIncludes(deps, included, target, stack, depth + 1);
+    const expanded = await expandAgentsMdIncludes(
+      deps,
+      included,
+      key,
+      realProjectRoot,
+      stack,
+      depth + 1,
+    );
     stack.delete(key);
     out.push(`<!-- Include: ${key} -->`);
     out.push(expanded);
   }
 
   return out.join('\n');
+}
+
+function isInsideOrEqual(child: string, parent: string, pathClass: PathClass): boolean {
+  const pathApi = pathClass === 'win32' ? win32 : posix;
+  const caseFold = (path: string): string => (pathClass === 'win32' ? path.toLowerCase() : path);
+  const relative = pathApi.relative(caseFold(parent), caseFold(child));
+  const escapes = relative === '..' || relative.startsWith(`..${pathApi.sep}`);
+  return relative === '' || (!escapes && !pathApi.isAbsolute(relative));
 }
 
 async function pathExists(deps: ProfileContextDeps, path: string): Promise<boolean> {

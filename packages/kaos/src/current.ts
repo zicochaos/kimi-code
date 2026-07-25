@@ -79,6 +79,10 @@ export function writeBytes(path: string, data: Buffer): Promise<number> {
   return getCurrentKaos().writeBytes(path, data);
 }
 
+export function realpath(path: string): Promise<string> {
+  return getCurrentKaos().realpath(path);
+}
+
 export function stat(path: string, options?: { followSymlinks?: boolean }): Promise<StatResult> {
   return getCurrentKaos().stat(path, options);
 }

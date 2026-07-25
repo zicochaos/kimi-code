@@ -30,7 +30,7 @@ rg -n "disabled_skills|persist_default_model|agents_md_expand_includes|formatTer
 | Option | Default | Purpose | Key code |
 | --- | --- | --- | --- |
 | `disabled_skills` | `[]` | Hide skill names from listing, the `Skill` tool, and slash menus; files stay on disk for shared `~/.agents/skills` | agent-core and agent-core-v2 skill catalogs; kap-server workspace list and activation error mapping |
-| `persist_default_model` | `true` | When `false`, model changes stay session-only and do not rewrite managed `config.toml` model settings | `packages/agent-core/src/config/persist-default-model.ts`, `packages/agent-core-v2/src/kosong/model/catalogService.ts` |
+| `persist_default_model` | `true` | When `false`, model changes stay session-only and do not rewrite managed `config.toml` model settings | `packages/agent-core/src/config/persist-default-model.ts`, `packages/agent-core-v2/src/app/kosongConfig/configSection.ts`, `packages/agent-core-v2/src/app/kosongConfig/kosongConfigService.ts` |
 | `agents_md_expand_includes` | `false` | When `true`, standalone `@path` lines in `AGENTS.md` are expanded at system-prompt assembly time (depth ≤ 5; missing/cycle/empty → HTML comments) | agent-core and agent-core-v2 profile context loaders; v2 `agentsMdExpandIncludes` config section |
 
 ### Experimental

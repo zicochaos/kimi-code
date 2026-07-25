@@ -114,7 +114,7 @@ export class SessionInitService implements ISessionInitService {
       });
 
       const agentsMd = await loadAgentsMd(
-        { fs: this.fs, homeDir: this.env.homeDir },
+        { fs: this.fs, homeDir: this.env.homeDir, pathClass: this.env.pathClass },
         own.cwd,
         this.bootstrap.homeDir,
         {

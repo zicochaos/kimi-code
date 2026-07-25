@@ -38,7 +38,7 @@ describe('loadAgentsMd user-level discovery', () => {
     await writeFile(join(homeDir, '.agents', 'AGENTS.md'), 'user generic', 'utf-8');
     await writeFile(join(workDir, 'AGENTS.md'), 'project instructions', 'utf-8');
 
-    const result = await loadAgentsMd({ fs, homeDir }, workDir);
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir);
 
     expect(result).toContain('user branded');
     expect(result).toContain('user generic');
@@ -51,7 +51,7 @@ describe('loadAgentsMd user-level discovery', () => {
     await mkdir(join(homeDir, '.agents'), { recursive: true });
     await writeFile(join(homeDir, '.agents', 'AGENTS.md'), 'dot-agents generic', 'utf-8');
 
-    const result = await loadAgentsMd({ fs, homeDir }, workDir);
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir);
 
     expect(result).toContain('dot-agents generic');
   });
@@ -59,7 +59,7 @@ describe('loadAgentsMd user-level discovery', () => {
   it('falls back to project-level only when no user-level files exist', async () => {
     await writeFile(join(workDir, 'AGENTS.md'), 'project only', 'utf-8');
 
-    const result = await loadAgentsMd({ fs, homeDir }, workDir);
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir);
 
     expect(result).toContain('project only');
     expect(result).not.toContain(homeDir);
@@ -69,7 +69,7 @@ describe('loadAgentsMd user-level discovery', () => {
     await mkdir(join(homeDir, '.kimi-code'), { recursive: true });
     await writeFile(join(homeDir, '.kimi-code', 'AGENTS.md'), 'home branded', 'utf-8');
 
-    const result = await loadAgentsMd({ fs, homeDir }, homeDir);
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, homeDir);
 
     expect(result.split('home branded').length - 1).toBe(1);
   });
@@ -88,7 +88,7 @@ describe('loadAgentsMd symlinked files', () => {
     await symlink(brandTarget, join(homeDir, '.kimi-code', 'AGENTS.md'));
     await symlink(projectTarget, join(workDir, 'AGENTS.md'));
 
-    const result = await loadAgentsMd({ fs, homeDir }, workDir);
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir);
 
     expect(result).toContain('brand via symlink');
     expect(result).toContain('project via symlink');
@@ -101,7 +101,7 @@ describe('loadAgentsMd unreadable paths', () => {
     extraDirs.push(brandHome);
     await symlink(join(workDir, 'missing-target.md'), join(workDir, 'AGENTS.md'));
 
-    const result = await prepareSystemPromptContext({ fs, homeDir }, workDir, brandHome);
+    const result = await prepareSystemPromptContext({ fs, homeDir, pathClass: 'posix' }, workDir, brandHome);
 
     expect(result.agentsMd).toBe('');
     expect(result.agentsMdWarning).toBeDefined();
@@ -125,7 +125,7 @@ describe('loadAgentsMd brand home (KIMI_CODE_HOME)', () => {
     await mkdir(join(homeDir, '.agents'), { recursive: true });
     await writeFile(join(homeDir, '.agents', 'AGENTS.md'), 'real home generic', 'utf-8');
 
-    const result = await loadAgentsMd({ fs, homeDir }, workDir, brandHome);
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir, brandHome);
 
     expect(result).toContain('brand home instructions');
     expect(result).toContain('real home generic');
@@ -136,7 +136,7 @@ describe('loadAgentsMd brand home (KIMI_CODE_HOME)', () => {
     await mkdir(join(homeDir, '.kimi-code'), { recursive: true });
     await writeFile(join(homeDir, '.kimi-code', 'AGENTS.md'), 'stale real-home brand', 'utf-8');
 
-    const result = await loadAgentsMd({ fs, homeDir }, workDir, brandHome);
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir, brandHome);
 
     expect(result).toContain('brand wins');
     expect(result).not.toContain('stale real-home brand');
@@ -146,7 +146,7 @@ describe('loadAgentsMd brand home (KIMI_CODE_HOME)', () => {
     await mkdir(join(homeDir, '.kimi-code'), { recursive: true });
     await writeFile(join(homeDir, '.kimi-code', 'AGENTS.md'), 'fallback branded', 'utf-8');
 
-    const result = await loadAgentsMd({ fs, homeDir }, workDir);
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir);
 
     expect(result).toContain('fallback branded');
   });
@@ -163,7 +163,7 @@ describe('loadAgentsMd nested project hierarchy', () => {
     await writeFile(join(projectRoot, 'packages', 'AGENTS.md'), 'packages instructions', 'utf-8');
     await writeFile(join(leaf, 'AGENTS.md'), 'leaf instructions', 'utf-8');
 
-    const result = await loadAgentsMd({ fs, homeDir }, leaf);
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, leaf);
 
     expect(result).toContain('root instructions');
     expect(result).toContain('packages instructions');
@@ -178,7 +178,7 @@ describe('loadAgentsMd oversized content', () => {
     const largeContent = 'x'.repeat(40 * 1024);
     await writeFile(join(workDir, 'AGENTS.md'), largeContent, 'utf-8');
 
-    const result = await loadAgentsMd({ fs, homeDir }, workDir);
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir);
 
     expect(result).toContain(largeContent);
     expect(result).not.toContain('truncated or omitted');
@@ -192,25 +192,27 @@ describe('loadAgentsMd expandIncludes', () => {
     await writeFile(join(rulesDir, 'python.md'), 'python rule body', 'utf-8');
     await writeFile(join(workDir, 'AGENTS.md'), `@${join(rulesDir, 'python.md')}\nlocal instructions\n`, 'utf-8');
 
-    const result = await loadAgentsMd({ fs, homeDir }, workDir);
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir);
 
     expect(result).toContain(`@${join(rulesDir, 'python.md')}`);
     expect(result).not.toContain('python rule body');
     expect(result).toContain('local instructions');
   });
 
-  it('inlines absolute and relative @path includes when expandIncludes is true', async () => {
-    const rulesDir = await mkdtemp(join(tmpdir(), 'kimi-agents-rules-'));
-    extraDirs.push(rulesDir);
-    await writeFile(join(rulesDir, 'python.md'), 'python rule body', 'utf-8');
-    await writeFile(join(workDir, 'relative-rule.md'), 'relative rule body', 'utf-8');
+  it('inlines project-relative and user-level absolute includes when expandIncludes is true', async () => {
+    const userRulesDir = await mkdtemp(join(tmpdir(), 'kimi-agents-user-rules-'));
+    extraDirs.push(userRulesDir);
+    await writeFile(join(userRulesDir, 'python.md'), 'python rule body', 'utf-8');
+    await mkdir(join(homeDir, '.kimi-code'), { recursive: true });
     await writeFile(
-      join(workDir, 'AGENTS.md'),
-      [`@${join(rulesDir, 'python.md')}`, '@relative-rule.md', 'local instructions'].join('\n'),
+      join(homeDir, '.kimi-code', 'AGENTS.md'),
+      `@${join(userRulesDir, 'python.md')}`,
       'utf-8',
     );
+    await writeFile(join(workDir, 'relative-rule.md'), 'relative rule body', 'utf-8');
+    await writeFile(join(workDir, 'AGENTS.md'), '@relative-rule.md\nlocal instructions', 'utf-8');
 
-    const result = await loadAgentsMd({ fs, homeDir }, workDir, undefined, {
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir, undefined, {
       expandIncludes: true,
     });
 
@@ -221,10 +223,55 @@ describe('loadAgentsMd expandIncludes', () => {
     expect(result).not.toMatch(/^@/m);
   });
 
+  it('blocks project-level absolute includes outside the project root', async () => {
+    const outsideDir = await mkdtemp(join(tmpdir(), 'kimi-agents-outside-'));
+    extraDirs.push(outsideDir);
+    await writeFile(join(outsideDir, 'secret.md'), 'outside absolute secret', 'utf-8');
+    await writeFile(join(workDir, 'AGENTS.md'), `@${join(outsideDir, 'secret.md')}`, 'utf-8');
+
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir, undefined, {
+      expandIncludes: true,
+    });
+
+    expect(result).toContain(`<!-- blocked include: ${join(outsideDir, 'secret.md')} -->`);
+    expect(result).not.toContain('outside absolute secret');
+  });
+
+  it('blocks project-level traversal outside the project root', async () => {
+    const parentDir = await mkdtemp(join(tmpdir(), 'kimi-agents-project-parent-'));
+    extraDirs.push(parentDir);
+    const projectDir = join(parentDir, 'project');
+    await mkdir(projectDir);
+    await writeFile(join(parentDir, 'secret.md'), 'outside traversal secret', 'utf-8');
+    await writeFile(join(projectDir, 'AGENTS.md'), '@../secret.md', 'utf-8');
+
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, projectDir, undefined, {
+      expandIncludes: true,
+    });
+
+    expect(result).toContain('<!-- blocked include: ../secret.md -->');
+    expect(result).not.toContain('outside traversal secret');
+  });
+
+  it('blocks project-level symlink escapes outside the project root', async () => {
+    const outsideDir = await mkdtemp(join(tmpdir(), 'kimi-agents-outside-'));
+    extraDirs.push(outsideDir);
+    await writeFile(join(outsideDir, 'secret.md'), 'outside symlink secret', 'utf-8');
+    await symlink(join(outsideDir, 'secret.md'), join(workDir, 'linked-rule.md'));
+    await writeFile(join(workDir, 'AGENTS.md'), '@linked-rule.md', 'utf-8');
+
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir, undefined, {
+      expandIncludes: true,
+    });
+
+    expect(result).toContain('<!-- blocked include: linked-rule.md -->');
+    expect(result).not.toContain('outside symlink secret');
+  });
+
   it('marks missing includes without dropping the rest of the file', async () => {
     await writeFile(join(workDir, 'AGENTS.md'), '@missing-rule.md\nkeep me\n', 'utf-8');
 
-    const result = await loadAgentsMd({ fs, homeDir }, workDir, undefined, {
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir, undefined, {
       expandIncludes: true,
     });
 
@@ -237,7 +284,7 @@ describe('loadAgentsMd expandIncludes', () => {
     await writeFile(join(workDir, 'b.md'), '@a.md\nfrom b\n', 'utf-8');
     await writeFile(join(workDir, 'AGENTS.md'), '@a.md\n', 'utf-8');
 
-    const result = await loadAgentsMd({ fs, homeDir }, workDir, undefined, {
+    const result = await loadAgentsMd({ fs, homeDir, pathClass: 'posix' }, workDir, undefined, {
       expandIncludes: true,
     });
 
@@ -254,7 +301,7 @@ describe('prepareSystemPromptContext AGENTS.md size warning', () => {
     const largeContent = 'x'.repeat(40 * 1024);
     await writeFile(join(workDir, 'AGENTS.md'), largeContent, 'utf-8');
 
-    const result = await prepareSystemPromptContext({ fs, homeDir }, workDir, brandHome);
+    const result = await prepareSystemPromptContext({ fs, homeDir, pathClass: 'posix' }, workDir, brandHome);
 
     expect(result.agentsMd).toContain(largeContent);
     expect(result.agentsMdWarning).toBeDefined();
@@ -266,7 +313,7 @@ describe('prepareSystemPromptContext AGENTS.md size warning', () => {
     extraDirs.push(brandHome);
     await writeFile(join(workDir, 'AGENTS.md'), 'small instructions', 'utf-8');
 
-    const result = await prepareSystemPromptContext({ fs, homeDir }, workDir, brandHome);
+    const result = await prepareSystemPromptContext({ fs, homeDir, pathClass: 'posix' }, workDir, brandHome);
 
     expect(result.agentsMdWarning).toBeUndefined();
   });
@@ -283,7 +330,7 @@ describe('prepareSystemPromptContext additional directories', () => {
     await writeFile(join(extraDir, 'AGENTS.md'), 'extra project instructions', 'utf-8');
     await writeFile(join(extraDir, 'extra-file.txt'), 'extra listing entry', 'utf-8');
 
-    const result = await prepareSystemPromptContext({ fs, homeDir }, workDir, brandHome, {
+    const result = await prepareSystemPromptContext({ fs, homeDir, pathClass: 'posix' }, workDir, brandHome, {
       additionalDirs: [extraDir],
     });
 
@@ -309,7 +356,7 @@ describe('prepareSystemPromptContext additional directories', () => {
     await writeFile(join(extraDirA, 'AGENTS.md'), 'extra A instructions', 'utf-8');
     await writeFile(join(extraDirB, 'AGENTS.md'), 'extra B instructions', 'utf-8');
 
-    const result = await prepareSystemPromptContext({ fs, homeDir }, workDir, brandHome, {
+    const result = await prepareSystemPromptContext({ fs, homeDir, pathClass: 'posix' }, workDir, brandHome, {
       additionalDirs: [extraDirA, extraDirB],
     });
 

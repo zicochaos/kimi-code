@@ -1,3 +1,5 @@
+import { posix, win32 } from 'node:path';
+
 import { dirname, isAbsolute, join } from 'pathe';
 
 import type { Kaos } from '@moonshot-ai/kaos';
@@ -27,8 +29,9 @@ export interface PreparedSystemPromptContext
 export interface PrepareSystemPromptContextOptions {
   readonly additionalDirs?: readonly string[];
   /**
-   * When true, expand `@path` include directives inside AGENTS.md files
-   * (absolute or relative to the including file). Default / absent = false.
+   * When true, expand `@path` include directives inside AGENTS.md files.
+   * Project-level targets stay confined to the project root after realpath;
+   * trusted user-level files may use absolute targets. Default / absent = false.
    */
   readonly expandIncludes?: boolean;
 }
@@ -81,14 +84,14 @@ async function loadAgentsMdForRoots(
   const discovered: AgentFile[] = [];
   const seen = new Set<string>();
 
-  const collect = async (path: string): Promise<boolean> => {
+  const collect = async (path: string, projectRoot?: string): Promise<boolean> => {
     const file = await readAgentFile(kaos, path);
     if (file === undefined) return false;
     const key = kaos.normpath(file.path);
     if (seen.has(key)) return false;
     seen.add(key);
     const content = expandIncludes
-      ? await expandAgentsMdIncludes(kaos, file.content, file.path)
+      ? await expandAgentsMdIncludes(kaos, file.content, file.path, projectRoot)
       : file.content;
     discovered.push({ path: file.path, content });
     return true;
@@ -117,9 +120,9 @@ async function loadAgentsMdForRoots(
     const dirs = dirsRootToLeaf(rootKaos, rootWorkDir, projectRoot);
 
     for (const dir of dirs) {
-      await collect(join(dir, '.kimi-code', 'AGENTS.md'));
+      await collect(join(dir, '.kimi-code', 'AGENTS.md'), projectRoot);
       for (const fileName of ['AGENTS.md', 'agents.md']) {
-        if (await collect(join(dir, fileName))) break;
+        if (await collect(join(dir, fileName), projectRoot)) break;
       }
     }
   }
@@ -198,12 +201,15 @@ export async function expandAgentsMdIncludes(
   kaos: Kaos,
   content: string,
   sourcePath: string,
+  projectRoot?: string,
   stack: Set<string> = new Set(),
   depth = 0,
 ): Promise<string> {
   if (depth >= AGENTS_MD_INCLUDE_MAX_DEPTH) return content;
 
   const baseDir = dirname(sourcePath);
+  const realProjectRoot =
+    projectRoot === undefined ? undefined : await kaos.realpath(projectRoot);
   const lines = content.split('\n');
   const out: string[] = [];
 
@@ -216,30 +222,62 @@ export async function expandAgentsMdIncludes(
 
     const raw = match[1] ?? '';
     const target = isAbsolute(raw) ? raw : join(baseDir, raw);
-    const key = kaos.normpath(target);
+    let key: string;
+    try {
+      key = await kaos.realpath(target);
+    } catch {
+      out.push(`<!-- missing include: ${raw} -->`);
+      continue;
+    }
+    if (
+      realProjectRoot !== undefined &&
+      !isInsideOrEqual(key, realProjectRoot, kaos.pathClass())
+    ) {
+      out.push(`<!-- blocked include: ${raw} -->`);
+      continue;
+    }
     if (stack.has(key)) {
       out.push(`<!-- circular include: ${raw} -->`);
       continue;
     }
-    if (!(await isFile(kaos, target))) {
+    if (!(await isFile(kaos, key))) {
       out.push(`<!-- missing include: ${raw} -->`);
       continue;
     }
 
-    const included = (await kaos.readText(target, { errors: 'ignore' })).trim();
+    const included = (await kaos.readText(key, { errors: 'ignore' })).trim();
     if (included.length === 0) {
       out.push(`<!-- empty include: ${raw} -->`);
       continue;
     }
 
     stack.add(key);
-    const expanded = await expandAgentsMdIncludes(kaos, included, target, stack, depth + 1);
+    const expanded = await expandAgentsMdIncludes(
+      kaos,
+      included,
+      key,
+      realProjectRoot,
+      stack,
+      depth + 1,
+    );
     stack.delete(key);
     out.push(`<!-- Include: ${key} -->`);
     out.push(expanded);
   }
 
   return out.join('\n');
+}
+
+function isInsideOrEqual(
+  child: string,
+  parent: string,
+  pathClass: ReturnType<Kaos['pathClass']>,
+): boolean {
+  const pathApi = pathClass === 'win32' ? win32 : posix;
+  const caseFold = (path: string): string => (pathClass === 'win32' ? path.toLowerCase() : path);
+  const relative = pathApi.relative(caseFold(parent), caseFold(child));
+  const escapes = relative === '..' || relative.startsWith(`..${pathApi.sep}`);
+  return relative === '' || (!escapes && !pathApi.isAbsolute(relative));
 }
 
 async function pathExists(kaos: Kaos, path: string): Promise<boolean> {
