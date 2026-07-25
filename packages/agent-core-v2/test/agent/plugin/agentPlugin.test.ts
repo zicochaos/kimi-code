@@ -196,6 +196,7 @@ describe('AgentPluginService plugin session-start wiring', () => {
       onDidChange: sinkChange.event,
       load: async () => {},
       reload: async () => {},
+      awaitPendingReloads: async () => {},
     };
 
     ctx = createTestAgent(
@@ -244,6 +245,7 @@ describe('AgentPluginService plugin session-start wiring', () => {
       onDidChange: sinkChange.event,
       load: async () => {},
       reload: async () => {},
+      awaitPendingReloads: async () => {},
     };
 
     ctx = createTestAgent(
@@ -290,6 +292,7 @@ describe('AgentPluginService plugin session-start wiring', () => {
       onDidChange: sinkChange.event,
       load: async () => {},
       reload: async () => {},
+      awaitPendingReloads: async () => {},
     };
 
     ctx = createTestAgent(

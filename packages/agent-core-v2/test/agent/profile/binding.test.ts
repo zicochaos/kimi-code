@@ -668,6 +668,7 @@ describe('AgentToolPolicyService.setSessionDisabledTools', () => {
         onDidChange: Event.None as Event<string>,
         load: async () => {},
         reload: async () => {},
+        awaitPendingReloads: async () => {},
       }),
     );
     const { profile, toolPolicy } = profileServices(ctx);
@@ -692,6 +693,7 @@ describe('AgentToolPolicyService.setSessionDisabledTools', () => {
         onDidChange: Event.None as Event<string>,
         load: async () => {},
         reload: async () => {},
+        awaitPendingReloads: async () => {},
       }),
     );
     const { profile, toolPolicy } = profileServices(ctx);
@@ -712,6 +714,7 @@ describe('AgentToolPolicyService.setSessionDisabledTools', () => {
         onDidChange: Event.None as Event<string>,
         load: async () => {},
         reload: async () => {},
+        awaitPendingReloads: async () => {},
       }),
     );
     const { profile, toolPolicy } = profileServices(ctx);
@@ -748,6 +751,7 @@ describe('AgentToolPolicyService.setSessionDisabledTools', () => {
         onDidChange: sinkChange.event,
         load: async () => {},
         reload: async () => {},
+        awaitPendingReloads: async () => {},
       }),
     );
     const { profile } = profileServices(ctx);
