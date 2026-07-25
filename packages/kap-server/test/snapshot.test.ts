@@ -104,6 +104,7 @@ describe('server-v2 snapshot route enrichment', () => {
             parent_tool_call_id: 'tc_swarm_1',
             swarm_index: 0,
             run_in_background: false,
+            model: 'example/test-model',
             created_at: new Date(now).toISOString(),
           },
         ],
@@ -165,6 +166,7 @@ describe('server-v2 snapshot route enrichment', () => {
         parent_tool_call_id: 'tc_swarm_1',
         swarm_index: 0,
         run_in_background: false,
+        model: 'example/test-model',
       }),
     ]);
   });

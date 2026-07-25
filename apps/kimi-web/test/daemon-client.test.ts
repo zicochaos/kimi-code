@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DaemonKimiWebApi } from '../src/api/daemon/client';
+import { toAppTask } from '../src/api/daemon/mappers';
 import { DaemonApiError, DaemonNetworkError } from '../src/api/errors';
 import { clearTrace, traceToJsonl } from '../src/debug/trace';
 import type { AppEvent, KimiEventConnection, KimiEventMeta } from '../src/api/types';
@@ -404,5 +405,21 @@ describe('DaemonKimiWebApi.connectEvents', () => {
       pendingInteraction: 'question',
       lastTurnReason: undefined,
     });
+  });
+});
+
+describe('snapshot subagent mapping', () => {
+  it('retains the selected model from the wire roster', () => {
+    const task = toAppTask({
+      id: 'agent-1',
+      session_id: 'session-1',
+      kind: 'subagent',
+      description: 'Inspect reconnect state',
+      status: 'running',
+      created_at: '2026-01-01T00:00:00.000Z',
+      model: 'example/test-model',
+    });
+
+    expect(task.model).toBe('example/test-model');
   });
 });

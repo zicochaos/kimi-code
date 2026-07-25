@@ -453,6 +453,7 @@ describe('reduceAppEvent taskProgress', () => {
             swarmIndex: 2,
             subagentType: 'explore',
             runInBackground: true,
+            model: 'example/test-model',
             outputLines: ['old line'],
             text: 'partial',
           },
@@ -469,6 +470,7 @@ describe('reduceAppEvent taskProgress', () => {
       swarmIndex: 2,
       subagentType: 'explore',
       runInBackground: true,
+      model: 'example/test-model',
       outputLines: ['old line'],
       text: 'partial',
     });

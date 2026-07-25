@@ -334,6 +334,7 @@ export interface WireTask {
   suspended_reason?: string;
   swarm_index?: number;
   run_in_background?: boolean;
+  model?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -389,6 +389,7 @@ export function toAppTask(wire: WireTask): AppTask {
     // subagent it returns is a background subagent (foreground ones never
     // persist there) — hence the `?? true` fallback for that path.
     runInBackground: wire.run_in_background ?? (wire.kind === 'subagent' ? true : undefined),
+    model: wire.model,
     // outputLines starts undefined; populated by eventReducer via task.progress events
   };
 }

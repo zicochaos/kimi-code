@@ -443,7 +443,12 @@ describe('background subagent task registration', () => {
     const projector = createAgentProjector();
     projector.project(
       'subagent.spawned',
-      { subagentId: 'agent-1', description: 'Explore repo', runInBackground: true },
+      {
+        subagentId: 'agent-1',
+        description: 'Explore repo',
+        runInBackground: true,
+        model: 'example/test-model',
+      },
       's1',
     );
 
@@ -472,6 +477,7 @@ describe('background subagent task registration', () => {
           kind: 'subagent',
           description: 'Explore repo',
           runInBackground: true,
+          model: 'example/test-model',
           backgroundTaskId: 'task-9',
         }),
       },

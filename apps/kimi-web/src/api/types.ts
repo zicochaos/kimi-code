@@ -332,6 +332,7 @@ export interface AppTask {
    *  the dock: the dock lists background subagents, while foreground subagents
    *  render inline in the message flow as the `Agent` tool card. */
   runInBackground?: boolean;
+  model?: string;
   /** The id this same subagent has in the server's background-task store
    *  (REST `/tasks`), learned from the `task.started` registration event. The
    *  WS event stream keys the agent by agent id while REST keys it by task id;
