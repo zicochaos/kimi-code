@@ -46,6 +46,8 @@ type BaseQueuedSubagentTask<T> = {
   readonly parentToolCallUuid?: string;
   readonly prompt: string;
   readonly description: string;
+  /** Exact configured alias for spawn tasks. Ignored on resume. */
+  readonly modelAlias?: string;
   readonly swarmIndex?: number;
   readonly swarmItem?: string;
   readonly runInBackground: boolean;
@@ -304,6 +306,7 @@ export class SubagentBatch<T> {
       parentToolCallUuid: task.parentToolCallUuid,
       prompt: task.prompt,
       description: task.description,
+      modelAlias: task.kind === 'spawn' ? task.modelAlias : undefined,
       swarmIndex: task.swarmIndex,
       runInBackground: task.runInBackground,
       signal: attempt.controller.signal,

@@ -6,10 +6,11 @@
  * persisted swarm item labels through the Session-scoped coordinator so later
  * `resume_agent_ids` calls relabel resumed subagents like v1. When the caller
  * has a model bound, the tool resolves the explicit or target-profile model
- * preference up front via `resolveSubagentBinding` and threads it through the
+ * preference up front via `resolveSubagentBinding` (or an exact configured
+ * alias when `subagent-model-selection` is enabled) and threads it through the
  * swarm tasks; otherwise binding is left to the service, which keeps its own
- * "no model bound" check and inherit-caller fallback. Pure tool — owns no
- * scoped state.
+ * "no model bound" check and inherit-caller fallback. Resumed subagents always
+ * keep their own model. Pure tool — owns no scoped state.
  */
 
 import { z } from 'zod';
@@ -25,6 +26,19 @@ import { registerTool } from '#/agent/toolRegistry/toolContribution';
 import { toInputJsonSchema } from '#/tool/input-schema';
 import { IConfigService } from '#/app/config/config';
 import { IFlagService } from '#/app/flag/flag';
+import { IModelCatalog } from '#/kosong/model/catalog';
+import { IModelService } from '#/kosong/model/model';
+import {
+  formatSubagentModelDirectory,
+  isSelectableSubagentModelAlias,
+  isSubagentModelChoiceToken,
+  normalizeSubagentModelAlias,
+  parametersWithSubagentModelSelection,
+  resolvedSubagentModelDirectory,
+  SUBAGENT_MODEL_UNAVAILABLE_MESSAGE,
+  subagentApprovalAgentName,
+} from '#/tool/subagentModelSelection/modelDirectory';
+import { SUBAGENT_MODEL_SELECTION_FLAG_ID } from '#/tool/subagentModelSelection/flag';
 import { ISessionSwarmService, type SessionSwarmTask } from '#/session/swarm/sessionSwarm';
 import { ISessionAgentProfileCatalog } from '#/session/sessionAgentProfileCatalog/sessionAgentProfileCatalog';
 import { IAgentProfileService } from '#/agent/profile/profile';
@@ -38,6 +52,7 @@ import {
   buildSubagentModelDescriptions,
   resolveSubagentBinding,
   resolveSubagentTimeoutMs,
+  type SubagentModelChoice,
 } from '#/session/subagent/configSection';
 import AGENT_SWARM_DESCRIPTION from './agent-swarm.md?raw';
 
@@ -82,10 +97,11 @@ export const AgentSwarmToolInputSchema = z
         'Map of existing subagent agent_id to the prompt used to resume that subagent. These resumed subagents are launched before new item-based subagents.',
       ),
     model: z
-      .enum(['secondary', 'primary'])
+      .string()
+      .min(1)
       .optional()
       .describe(
-        'Which model to run the item-spawned subagents on: "secondary" = the configured secondary model; "primary" = the main model you are running on (for hard, quality-sensitive tasks). This explicit choice overrides the selected agent type\'s model_preference; without either, secondary is the default when configured. Only effective when a secondary model is configured; otherwise subagents inherit your model. Resumed subagents always keep their own model.',
+        'Which model to run the item-spawned subagents on: "secondary" = the configured secondary model; "primary" = the main model you are running on (for hard, quality-sensitive tasks). This explicit choice overrides the selected agent type\'s model_preference; without either, secondary is the default when configured. Only effective when a secondary model is configured; otherwise subagents inherit your model. When experimental subagent-model-selection is enabled, model may also be an exact configured alias from the available model directory. Resumed subagents always keep their own model.',
       ),
   })
   .strict();
@@ -120,8 +136,9 @@ interface SwarmRunResult {
 
 export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
   readonly name = 'AgentSwarm' as const;
-  readonly parameters: Record<string, unknown> = toInputJsonSchema(AgentSwarmToolInputSchema);
 
+  private readonly baseParameters: Record<string, unknown> =
+    toInputJsonSchema(AgentSwarmToolInputSchema);
   private readonly callerAgentId: string;
 
   constructor(
@@ -132,34 +149,99 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
     @IFlagService private readonly flags: IFlagService,
     @ISessionAgentProfileCatalog private readonly catalog: ISessionAgentProfileCatalog,
     @IAgentProfileService private readonly profile: IAgentProfileService,
+    @IModelService private readonly models: IModelService,
+    @IModelCatalog private readonly modelCatalog: IModelCatalog,
   ) {
     this.callerAgentId = scopeContext.agentId;
   }
 
+  get parameters(): Record<string, unknown> {
+    return parametersWithSubagentModelSelection(
+      this.baseParameters,
+      this.exactModelSelectionEnabled(),
+    );
+  }
+
   get description(): string {
+    let description = AGENT_SWARM_DESCRIPTION;
     const modelLines = buildSubagentModelDescriptions(
       this.config,
       this.flags,
       this.profile.data().modelAlias,
     );
-    return modelLines === undefined
-      ? AGENT_SWARM_DESCRIPTION
-      : `${AGENT_SWARM_DESCRIPTION}\n\n${modelLines}`;
+    if (modelLines !== undefined) {
+      description += `\n\n${modelLines}`;
+    }
+    if (this.exactModelSelectionEnabled()) {
+      description += `\n\n${formatSubagentModelDirectory(this.modelDirectory())}`;
+    }
+    return description;
   }
 
   resolveExecution(args: AgentSwarmToolInput): ToolExecution {
-    const agentCount = (args.items?.length ?? 0) + Object.keys(args.resume_agent_ids ?? {}).length;
+    const itemCount = args.items?.length ?? 0;
+    let displayModel: string | undefined;
+    if (itemCount > 0 && args.model !== undefined) {
+      const preflight = this.preflightRequestedModel(args.model);
+      if (preflight.error !== undefined) {
+        return { output: preflight.error, isError: true };
+      }
+      displayModel = preflight.displayModel;
+    }
+    const agentCount = itemCount + Object.keys(args.resume_agent_ids ?? {}).length;
+    const agentName = subagentApprovalAgentName(`swarm (${agentCount} subagents)`, displayModel);
     return {
       accesses: ToolAccesses.all(),
       description: `Launching agent swarm: ${args.description}`,
       display: {
         kind: 'agent_call',
-        agent_name: `swarm (${agentCount} subagents)`,
+        agent_name: agentName,
         prompt: args.description,
       },
       approvalRule: this.name,
       execute: (ctx) => this.execution(args, ctx),
     };
+  }
+
+  private exactModelSelectionEnabled(): boolean {
+    return this.flags.enabled(SUBAGENT_MODEL_SELECTION_FLAG_ID);
+  }
+
+  private modelDirectory() {
+    return resolvedSubagentModelDirectory(
+      this.models,
+      this.modelCatalog,
+      this.profile.data().modelAlias,
+    );
+  }
+
+  private preflightRequestedModel(
+    requested: string,
+  ): { readonly displayModel?: string; readonly error?: string } {
+    if (isSubagentModelChoiceToken(requested)) {
+      return { displayModel: requested };
+    }
+    if (!this.exactModelSelectionEnabled()) {
+      return {
+        error:
+          'Subagent model selection is disabled. Enable the subagent-model-selection experimental feature to use exact model aliases, or pass "primary"/"secondary".',
+      };
+    }
+    try {
+      const modelAlias = normalizeSubagentModelAlias(requested);
+      if (modelAlias === undefined) return {};
+      const directory = this.modelDirectory();
+      if (
+        directory.models === undefined ||
+        !isSelectableSubagentModelAlias(directory.models, modelAlias)
+      ) {
+        throw new Error(SUBAGENT_MODEL_UNAVAILABLE_MESSAGE);
+      }
+      this.modelCatalog.get(modelAlias);
+      return { displayModel: modelAlias };
+    } catch {
+      return { error: `subagent error: ${SUBAGENT_MODEL_UNAVAILABLE_MESSAGE}` };
+    }
   }
 
   private async execution(
@@ -199,12 +281,22 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
         throw new Error(`Unknown agent type: "${profileName}"`);
       }
       if (own.modelAlias !== undefined) {
-        binding = resolveSubagentBinding(
-          this.config,
-          this.flags,
-          { modelAlias: own.modelAlias, thinkingLevel: own.thinkingLevel },
-          args.model ?? targetProfile.modelPreference,
-        );
+        if (args.model !== undefined) {
+          const preflight = this.preflightRequestedModel(args.model);
+          if (preflight.error !== undefined) {
+            throw new Error(preflight.error.replace(/^subagent error: /, ''));
+          }
+        }
+        if (args.model !== undefined && !isSubagentModelChoiceToken(args.model)) {
+          binding = { model: args.model };
+        } else {
+          binding = resolveSubagentBinding(
+            this.config,
+            this.flags,
+            { modelAlias: own.modelAlias, thinkingLevel: own.thinkingLevel },
+            (args.model as SubagentModelChoice | undefined) ?? targetProfile.modelPreference,
+          );
+        }
       }
     }
     const timeoutMs = resolveSubagentTimeoutMs(this.config);

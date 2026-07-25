@@ -289,6 +289,7 @@ export * from '#/session/mcp/sessionMcpService';
 export * from '#/session/subagent/subagent';
 export * from '#/session/subagent/subagentService';
 import '#/session/subagent/flag';
+import '#/tool/subagentModelSelection/flag';
 export * from '#/session/subagent/secondaryModelWarning';
 export * from '#/session/subagent/secondaryModelWarningService';
 export * from '#/session/subagent/tools/subagent-task';

@@ -314,6 +314,36 @@ describe('AgentTool', () => {
     expect(result.output).toContain('resumed result');
   });
 
+  it('ignores model selection when resuming an existing agent', async () => {
+    const host = mockSubagentHost({
+      spawn: vi.fn(),
+      resume: vi.fn().mockResolvedValue({
+        agentId: 'agent-existing',
+        profileName: 'explore',
+        resumed: true,
+        completion: Promise.resolve({ result: 'resumed result' }),
+      }),
+    });
+    const tool = agentTool(host);
+
+    const result = await executeTool(
+      tool,
+      context({
+        prompt: 'Continue',
+        description: 'Continue work',
+        resume: 'agent-existing',
+        model: 'example/unavailable-model',
+      }),
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(host.spawn).not.toHaveBeenCalled();
+    expect(host.resume).toHaveBeenCalledWith(
+      'agent-existing',
+      expect.objectContaining({ modelAlias: undefined }),
+    );
+  });
+
   it('returns an error when resuming with a subagent type', async () => {
     const host = mockSubagentHost({
       spawn: vi.fn(),

@@ -12,11 +12,14 @@
  *
  * Spawn bindings use an explicit tool choice first, then the target profile's
  * symbolic model preference, before `resolveSubagentBinding` falls back to the
- * configured secondary model or the caller's model. The selected alias is
- * resolved through the model catalog before lifecycle allocation. A resumed
- * agent keeps the model recorded in its own wire journal — with per-subagent
- * models there is no "child follows the parent's current model" invariant to
- * enforce.
+ * configured secondary model or the caller's model. When the experimental
+ * `subagent-model-selection` flag is on, the `model` parameter also accepts an
+ * exact configured alias from the safe directory (thinking resolves naturally
+ * for that alias). The selected alias is resolved through the model catalog
+ * before lifecycle allocation. A resumed agent keeps the model recorded in its
+ * own wire journal — with per-subagent models there is no "child follows the
+ * parent's current model" invariant to enforce, and the model parameter is
+ * ignored on resume.
  *
  * Registered via the module-level `registerTool(AgentTool)` at the bottom of
  * this file — the same "import = register" pattern used by every builtin tool.
@@ -66,6 +69,18 @@ import { ILogService } from '#/_base/log/log';
 import { IConfigService } from '#/app/config/config';
 import { IFlagService } from '#/app/flag/flag';
 import { IModelCatalog } from '#/kosong/model/catalog';
+import { IModelService } from '#/kosong/model/model';
+import {
+  formatSubagentModelDirectory,
+  isSelectableSubagentModelAlias,
+  isSubagentModelChoiceToken,
+  normalizeSubagentModelAlias,
+  parametersWithSubagentModelSelection,
+  resolvedSubagentModelDirectory,
+  SUBAGENT_MODEL_UNAVAILABLE_MESSAGE,
+  subagentApprovalAgentName,
+} from '#/tool/subagentModelSelection/modelDirectory';
+import { SUBAGENT_MODEL_SELECTION_FLAG_ID } from '#/tool/subagentModelSelection/flag';
 import { IAgentLifecycleService } from '#/session/agentLifecycle/agentLifecycle';
 import { isSubagentMeta, subagentLabels, subagentParentAgentId } from '#/session/agentLifecycle/subagentMetadata';
 import { ISessionProcessRunner } from '#/session/process/processRunner';
@@ -80,6 +95,7 @@ import {
   resolveSubagentBinding,
   resolveSubagentTimeoutMs,
   wrapSubagentModelError,
+  type SubagentModelChoice,
 } from '../configSection';
 import { SECONDARY_MODEL_FLAG_ID } from '../flag';
 import { SubagentTask, type SubagentHandle } from './subagent-task';
@@ -131,10 +147,11 @@ export const AgentToolInputSchema = z.preprocess(
         'If true, return immediately without waiting for completion. Prefer false unless the task can run independently and there is a clear benefit to not waiting.',
       ),
     model: z
-      .enum(['secondary', 'primary'])
+      .string()
+      .min(1)
       .optional()
       .describe(
-        'Which model to run the subagent on: "secondary" = the configured secondary model; "primary" = the main model you are running on (for hard, quality-sensitive tasks). This explicit choice overrides the selected agent type\'s model_preference; without either, secondary is the default when configured. Only effective when a secondary model is configured; otherwise the subagent inherits your model. Ignored when resuming — resumed subagents keep their own model.',
+        'Which model to run the subagent on: "secondary" = the configured secondary model; "primary" = the main model you are running on (for hard, quality-sensitive tasks). This explicit choice overrides the selected agent type\'s model_preference; without either, secondary is the default when configured. Only effective when a secondary model is configured; otherwise the subagent inherits your model. When experimental subagent-model-selection is enabled, model may also be an exact configured alias from the available model directory. Ignored when resuming — resumed subagents keep their own model.',
       ),
   }),
 );
@@ -167,10 +184,17 @@ const SUBAGENT_STOPPED_MESSAGE = 'The subagent was stopped before it finished.';
 
 export class AgentTool implements BuiltinTool<AgentToolInput> {
   readonly name: string = 'Agent';
-  readonly parameters: Record<string, unknown> = toInputJsonSchema(AgentToolInputSchema);
 
+  private readonly baseParameters: Record<string, unknown> = toInputJsonSchema(AgentToolInputSchema);
   private readonly callerAgentId: string;
   private readonly canRunInBackground: () => boolean;
+
+  get parameters(): Record<string, unknown> {
+    return parametersWithSubagentModelSelection(
+      this.baseParameters,
+      this.exactModelSelectionEnabled(),
+    );
+  }
 
   constructor(
     @IAgentLifecycleService private readonly lifecycle: IAgentLifecycleService,
@@ -188,6 +212,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     @IAgentPermissionModeService private readonly permissionMode: IAgentPermissionModeService,
     @IConfigService private readonly config: IConfigService,
     @IFlagService private readonly flags: IFlagService,
+    @IModelService private readonly models: IModelService,
     @IModelCatalog private readonly modelCatalog: IModelCatalog,
   ) {
     this.callerAgentId = scopeContext.agentId;
@@ -225,32 +250,41 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     if (modelLines !== undefined) {
       description += `\n\n${modelLines}`;
     }
+    if (this.exactModelSelectionEnabled()) {
+      description += `\n\n${formatSubagentModelDirectory(this.modelDirectory())}`;
+    }
     return description;
   }
 
   async resolveExecution(args: AgentToolInput): Promise<ToolExecution> {
     const requestedProfileName = args.subagent_type?.length ? args.subagent_type : undefined;
     const resumeAgentId = args.resume?.trim();
+    const isResume = resumeAgentId !== undefined && resumeAgentId.length > 0;
 
-    if (
-      resumeAgentId !== undefined &&
-      resumeAgentId.length > 0 &&
-      requestedProfileName !== undefined
-    ) {
+    if (isResume && requestedProfileName !== undefined) {
       return { output: RESUME_WITH_TYPE_UNAVAILABLE, isError: true };
     }
 
-    const profileNameForDisplay =
-      resumeAgentId !== undefined && resumeAgentId.length > 0
-        ? this.resumeProfileName(resumeAgentId) ?? RESUMED_LABEL
-        : requestedProfileName ?? DEFAULT_PROFILE_NAME;
+    let displayModel: string | undefined;
+    if (!isResume && args.model !== undefined) {
+      const preflight = this.preflightRequestedModel(args.model);
+      if (preflight.error !== undefined) {
+        return { output: preflight.error, isError: true };
+      }
+      displayModel = preflight.displayModel;
+    }
+
+    const profileNameForDisplay = isResume
+      ? this.resumeProfileName(resumeAgentId) ?? RESUMED_LABEL
+      : requestedProfileName ?? DEFAULT_PROFILE_NAME;
+    const displayAgentName = subagentApprovalAgentName(profileNameForDisplay, displayModel);
     const prefix = args.run_in_background === true ? 'Launching background' : 'Launching';
     return {
-      description: `${prefix} ${profileNameForDisplay} agent: ${args.description}`,
+      description: `${prefix} ${displayAgentName} agent: ${args.description}`,
       accesses: ToolAccesses.none(),
       display: {
         kind: 'agent_call',
-        agent_name: profileNameForDisplay,
+        agent_name: displayAgentName,
         prompt: args.prompt,
         background: args.run_in_background,
       },
@@ -258,6 +292,65 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, profileNameForDisplay),
       execute: (ctx) => this.execution(args, ctx),
     };
+  }
+
+  private exactModelSelectionEnabled(): boolean {
+    return this.flags.enabled(SUBAGENT_MODEL_SELECTION_FLAG_ID);
+  }
+
+  private modelDirectory() {
+    return resolvedSubagentModelDirectory(
+      this.models,
+      this.modelCatalog,
+      this.profile.data().modelAlias,
+    );
+  }
+
+  private preflightRequestedModel(
+    requested: string,
+  ): { readonly displayModel?: string; readonly error?: string } {
+    if (isSubagentModelChoiceToken(requested)) {
+      return { displayModel: requested };
+    }
+    if (!this.exactModelSelectionEnabled()) {
+      return {
+        error:
+          'Subagent model selection is disabled. Enable the subagent-model-selection experimental feature to use exact model aliases, or pass "primary"/"secondary".',
+      };
+    }
+    try {
+      const modelAlias = normalizeSubagentModelAlias(requested);
+      if (modelAlias === undefined) return {};
+      const directory = this.modelDirectory();
+      if (
+        directory.models === undefined ||
+        !isSelectableSubagentModelAlias(directory.models, modelAlias)
+      ) {
+        throw new Error(SUBAGENT_MODEL_UNAVAILABLE_MESSAGE);
+      }
+      this.modelCatalog.get(modelAlias);
+      return { displayModel: modelAlias };
+    } catch (error) {
+      this.log.warn('subagent model selection failed', { modelAlias: requested, error });
+      return { error: `subagent error: ${SUBAGENT_MODEL_UNAVAILABLE_MESSAGE}` };
+    }
+  }
+
+  private resolveSpawnBinding(
+    own: { modelAlias: string; thinkingLevel: string },
+    requested: string | undefined,
+    profilePreference: SubagentModelChoice | undefined,
+  ): { model: string; thinking?: string } {
+    if (requested !== undefined && !isSubagentModelChoiceToken(requested)) {
+      // Exact alias: thinking resolves naturally (global → model default).
+      return { model: requested };
+    }
+    return resolveSubagentBinding(
+      this.config,
+      this.flags,
+      own,
+      (requested as SubagentModelChoice | undefined) ?? profilePreference,
+    );
   }
 
   private resumeProfileName(agentId: string): string | undefined {
@@ -308,11 +401,16 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       if (own.modelAlias === undefined) {
         throw new Error('Caller agent has no model bound');
       }
-      const binding = resolveSubagentBinding(
-        this.config,
-        this.flags,
+      if (args.model !== undefined) {
+        const preflight = this.preflightRequestedModel(args.model);
+        if (preflight.error !== undefined) {
+          throw new Error(preflight.error.replace(/^subagent error: /, ''));
+        }
+      }
+      const binding = this.resolveSpawnBinding(
         { modelAlias: own.modelAlias, thinkingLevel: own.thinkingLevel },
-        args.model ?? profile.modelPreference,
+        args.model,
+        profile.modelPreference,
       );
       let created: IAgentScopeHandle;
       try {
