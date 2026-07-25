@@ -16,13 +16,15 @@
  * truncating.
  */
 
-import { dirname, join, normalize } from 'pathe';
+import { dirname, isAbsolute, join, normalize } from 'pathe';
 
 import type { IHostFileSystem } from '#/os/interface/hostFileSystem';
 
 import type { SystemPromptContext } from './profile';
 
 export const AGENTS_MD_RECOMMENDED_MAX_BYTES = 32 * 1024;
+const AGENTS_MD_INCLUDE_MAX_DEPTH = 5;
+const AGENTS_MD_INCLUDE_LINE = /^@\s*(\S+)\s*$/;
 
 export const LIST_DIR_ROOT_WIDTH = 30;
 export const LIST_DIR_CHILD_WIDTH = 10;
@@ -41,6 +43,11 @@ export interface PreparedSystemPromptContext extends SystemPromptContext {
 
 export interface PrepareSystemPromptContextOptions {
   readonly additionalDirs?: readonly string[];
+  /**
+   * When true, expand `@path` include directives inside AGENTS.md files
+   * (absolute or relative to the including file). Default / absent = false.
+   */
+  readonly expandIncludes?: boolean;
 }
 
 export async function prepareSystemPromptContext(
@@ -50,9 +57,10 @@ export async function prepareSystemPromptContext(
   options?: PrepareSystemPromptContextOptions,
 ): Promise<PreparedSystemPromptContext> {
   const additionalDirs = dedupeDirs(options?.additionalDirs ?? []);
+  const expandIncludes = options?.expandIncludes === true;
   const [cwdListing, agentsMdResult, additionalDirsInfo] = await Promise.all([
     listDirectory(deps, workDir, { collapseHiddenDirs: true }),
-    loadAgentsMdForRoots(deps, brandHome, [workDir]),
+    loadAgentsMdForRoots(deps, brandHome, [workDir], expandIncludes),
     loadAdditionalDirsInfo(deps, additionalDirs),
   ]);
   return {
@@ -67,8 +75,14 @@ export async function loadAgentsMd(
   deps: ProfileContextDeps,
   workDir: string,
   brandHome?: string,
+  options?: { readonly expandIncludes?: boolean },
 ): Promise<string> {
-  const result = await loadAgentsMdForRoots(deps, brandHome, [workDir]);
+  const result = await loadAgentsMdForRoots(
+    deps,
+    brandHome,
+    [workDir],
+    options?.expandIncludes === true,
+  );
   return result.content;
 }
 
@@ -81,6 +95,7 @@ async function loadAgentsMdForRoots(
   deps: ProfileContextDeps,
   brandHome: string | undefined,
   workDirs: readonly string[],
+  expandIncludes = false,
 ): Promise<LoadedAgentsMd> {
   const discovered: AgentFile[] = [];
   const seen = new Set<string>();
@@ -95,7 +110,10 @@ async function loadAgentsMdForRoots(
     const key = normalize(file.path);
     if (seen.has(key)) return false;
     seen.add(key);
-    discovered.push(file);
+    const content = expandIncludes
+      ? await expandAgentsMdIncludes(deps, file.content, file.path)
+      : file.content;
+    discovered.push({ path: file.path, content });
     return true;
   };
 
@@ -202,6 +220,66 @@ async function readAgentFile(
   }
   if (content.length === 0) return undefined;
   return { path, content };
+}
+
+/**
+ * Expand lines of the form `@path` (absolute or relative to the including
+ * file) by inlining the target file contents. Nested includes are supported up
+ * to {@link AGENTS_MD_INCLUDE_MAX_DEPTH}. Cycles and missing files become HTML
+ * comments so the rest of the instruction file still loads.
+ */
+export async function expandAgentsMdIncludes(
+  deps: ProfileContextDeps,
+  content: string,
+  sourcePath: string,
+  stack: Set<string> = new Set(),
+  depth = 0,
+): Promise<string> {
+  if (depth >= AGENTS_MD_INCLUDE_MAX_DEPTH) return content;
+
+  const baseDir = dirname(sourcePath);
+  const lines = content.split('\n');
+  const out: string[] = [];
+
+  for (const line of lines) {
+    const match = AGENTS_MD_INCLUDE_LINE.exec(line);
+    if (match === null) {
+      out.push(line);
+      continue;
+    }
+
+    const raw = match[1] ?? '';
+    const target = isAbsolute(raw) ? raw : join(baseDir, raw);
+    const key = normalize(target);
+    if (stack.has(key)) {
+      out.push(`<!-- circular include: ${raw} -->`);
+      continue;
+    }
+    if (!(await isFile(deps, target))) {
+      out.push(`<!-- missing include: ${raw} -->`);
+      continue;
+    }
+
+    let included: string;
+    try {
+      included = (await deps.fs.readText(target, { errors: 'ignore' })).trim();
+    } catch {
+      out.push(`<!-- missing include: ${raw} -->`);
+      continue;
+    }
+    if (included.length === 0) {
+      out.push(`<!-- empty include: ${raw} -->`);
+      continue;
+    }
+
+    stack.add(key);
+    const expanded = await expandAgentsMdIncludes(deps, included, target, stack, depth + 1);
+    stack.delete(key);
+    out.push(`<!-- Include: ${key} -->`);
+    out.push(expanded);
+  }
+
+  return out.join('\n');
 }
 
 async function pathExists(deps: ProfileContextDeps, path: string): Promise<boolean> {

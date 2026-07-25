@@ -5,6 +5,7 @@ import { DisposableStore } from '#/_base/di/lifecycle';
 import { TestInstantiationService } from '#/_base/di/test';
 import { UserCancellationError } from '#/_base/utils/abort';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
+import { IConfigService } from '#/app/config/config';
 import { IEventBus } from '#/app/event/eventBus';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
@@ -117,6 +118,10 @@ describe('SessionInitService', () => {
       _serviceBrand: undefined,
       homeDir: '/home/brand',
     } as unknown as IBootstrapService);
+    ix.stub(IConfigService, {
+      _serviceBrand: undefined,
+      get: vi.fn(() => false),
+    } as unknown as IConfigService);
     ix.set(ISessionInitService, new SyncDescriptor(SessionInitService));
   });
 

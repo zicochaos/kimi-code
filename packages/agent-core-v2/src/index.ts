@@ -480,6 +480,8 @@ export * from '#/agent/permissionRules/permissionRulesService';
 export * from '#/agent/profile/profile';
 export * from '#/agent/profile/profileService';
 export * from '#/agent/profile/context';
+import '#/agent/profile/configSection';
+export * from '#/agent/profile/configSection';
 export * from '#/agent/prompt/prompt';
 export * from '#/agent/prompt/promptService';
 import '#/app/messageLegacy/errors';

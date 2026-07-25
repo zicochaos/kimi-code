@@ -676,7 +676,10 @@ export class Session {
     const context = await prepareSystemPromptContext(
       this.systemContextKaos(agent.kaos.getcwd()),
       this.options.kimiHomeDir,
-      { additionalDirs: this.additionalDirs },
+      {
+        additionalDirs: this.additionalDirs,
+        expandIncludes: this.options.config?.agentsMdExpandIncludes === true,
+      },
     );
     agent.useProfile(profile, context, this.options.kimiHomeDir);
     const { agentsMdWarning } = context;
@@ -715,7 +718,10 @@ export class Session {
       const context = await prepareSystemPromptContext(
         this.systemContextKaos(this.toolKaos.getcwd()),
         this.options.kimiHomeDir,
-        { additionalDirs: this.additionalDirs },
+        {
+          additionalDirs: this.additionalDirs,
+          expandIncludes: this.options.config?.agentsMdExpandIncludes === true,
+        },
       );
       this.agentsMdWarning = context.agentsMdWarning;
     } catch (error) {
@@ -739,7 +745,9 @@ export class Session {
       });
       await handle.completion;
 
-      const agentsMd = await loadAgentsMd(mainAgent.kaos, this.options.kimiHomeDir);
+      const agentsMd = await loadAgentsMd(mainAgent.kaos, this.options.kimiHomeDir, {
+        expandIncludes: this.options.config?.agentsMdExpandIncludes === true,
+      });
       mainAgent.context.appendSystemReminder(initCompletionReminder(agentsMd), {
         kind: 'injection',
         variant: 'init',
@@ -958,7 +966,10 @@ export class Session {
         prepareSystemPromptContext(
           this.systemContextKaos(agent.kaos.getcwd()),
           this.options.kimiHomeDir,
-          { additionalDirs: agent.getAdditionalDirs() },
+          {
+            additionalDirs: agent.getAdditionalDirs(),
+            expandIncludes: this.options.config?.agentsMdExpandIncludes === true,
+          },
         ),
     });
     return agent;

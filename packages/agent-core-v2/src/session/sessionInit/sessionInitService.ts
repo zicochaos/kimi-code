@@ -25,8 +25,13 @@ import { InstantiationType } from '#/_base/di/extensions';
 import { LifecycleScope, registerScopedService } from '#/_base/di/scope';
 import { isAbortError, isUserCancellation, userCancellationReason } from '#/_base/utils/abort';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
+import { IConfigService } from '#/app/config/config';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
 import { IHostFileSystem } from '#/os/interface/hostFileSystem';
+import {
+  AGENTS_MD_EXPAND_INCLUDES_SECTION,
+  type AgentsMdExpandIncludes,
+} from '#/agent/profile/configSection';
 import { IAgentProfileService } from '#/agent/profile/profile';
 import { loadAgentsMd } from '#/agent/profile/context';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
@@ -56,6 +61,7 @@ export class SessionInitService implements ISessionInitService {
     @IHostFileSystem private readonly fs: IHostFileSystem,
     @IHostEnvironment private readonly env: IHostEnvironment,
     @IBootstrapService private readonly bootstrap: IBootstrapService,
+    @IConfigService private readonly config: IConfigService,
   ) {}
 
   cancelInit(): void {
@@ -110,6 +116,10 @@ export class SessionInitService implements ISessionInitService {
         { fs: this.fs, homeDir: this.env.homeDir },
         own.cwd,
         this.bootstrap.homeDir,
+        {
+          expandIncludes:
+            this.config.get<AgentsMdExpandIncludes>(AGENTS_MD_EXPAND_INCLUDES_SECTION) === true,
+        },
       );
       main.accessor
         .get(IAgentSystemReminderService)
