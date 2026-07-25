@@ -8,7 +8,8 @@
 # commented "# field: type" lines describe the remaining schema fields.
 # Values resolve as: default -> config.toml -> env overlay -> memory.
 
-# Index (24 sections · 3 overlay(s))
+# Index (25 sections · 3 overlay(s))
+#   agentsMdExpandIncludes   src/agent/profile/configSection.ts
 #   background               src/agent/task/configSection.ts
 #   cron                     src/app/cron/configSection.ts
 #   defaultPermissionMode    src/agent/permissionMode/configSection.ts
@@ -36,6 +37,14 @@
 #   (overlay) servicesCredentialEnvOverlay  src/app/auth/configSection.ts
 #   (overlay) kimiModelEnvOverlay  src/app/kosongConfig/envOverlay.ts
 #   (overlay) secondaryModelOverlay  src/app/kosongConfig/secondaryModelOverlay.ts
+
+# ##########################################################################
+# agentsMdExpandIncludes (config.toml: agents_md_expand_includes)
+#   owner: src/agent/profile/configSection.ts
+#   scope: core
+# ##########################################################################
+
+agents_md_expand_includes = false
 
 # ##########################################################################
 # background

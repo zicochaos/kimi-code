@@ -22,6 +22,25 @@ Kimi Code CLI 内置三种子 Agent，开箱即用，分别面向不同任务形
 
 子 Agent 支持在后台运行：完成后结果自动回到主 Agent，无需手动轮询。也可以唤回已有的子 Agent 实例继续推进同一任务。
 
+为委派任务选择精确的已配置模型 alias 是实验功能，默认关闭。可在 `config.toml` 中持久启用：
+
+```toml
+[experimental]
+subagent-model-selection = true
+```
+
+仅对当前进程启用时，可设置专用环境变量：
+
+```sh
+export KIMI_CODE_EXPERIMENTAL_SUBAGENT_MODEL_SELECTION=1
+```
+
+启用后，`Agent` 与 `AgentSwarm` 的可选 `model` 参数除了上游次主力模型实验的 `primary` / `secondary` 之外，还接受精确的已配置模型 alias。主 Agent 会看到由安全、可物化的模型 alias 构成的目录。省略 `model` 时保持原有 secondary/primary 默认。已恢复的子 Agent 保持其实例上已绑定的模型。
+
+目录最多展示 64 个 ASCII 安全的模型 alias，以及受限的非敏感元数据：已知 capabilities、上下文/输出上限，以及固定 thinking effort 取值 `off`、`on`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`。其他 alias 与元数据会被省略而非改写，因此展示的 alias 始终是确切的配置键。目录从不包含显示名、API key、base URL、自定义 header、provider 标识、provider 线模型名或 `passthrough` 配置。权限规则仍按语义上的 agent profile 名匹配；审批标签可为清晰起见附带所选模型。
+
+修改 `config.toml` 后请执行 `/reload`（或开新会话）。不同 provider/model 的价格、上下文窗口与能力可能不同，大批量委派前请核对相关配额与计费。
+
 ## 上下文隔离与资源开销
 
 每个子 Agent 拥有完全独立的上下文窗口，只能看到主 Agent 显式传入的任务描述，看不到主 Agent 的对话历史。子 Agent 自己的中间思考和工具调用记录不会回流，只有最终结果会出现在主 Agent 的上下文里。
