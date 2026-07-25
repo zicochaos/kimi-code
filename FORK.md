@@ -29,7 +29,7 @@ rg -n "disabled_skills|persist_default_model|agents_md_expand_includes|formatTer
 
 | Option | Default | Purpose | Key code |
 | --- | --- | --- | --- |
-| `disabled_skills` | `[]` | Hide skill names from listing, the `Skill` tool, and slash menus; files stay on disk for shared `~/.agents/skills` | agent-core and agent-core-v2 skill catalogs; kap-server workspace list and activation error mapping |
+| `disabled_skills` | `[]` | Hide skill names from listing, the `Skill` tool, and slash menus; files stay on disk for shared `~/.agents/skills`. Listing waits for async source reloads (`awaitPendingReloads`) | agent-core and agent-core-v2 skill catalogs; kap-server workspace list and activation error mapping |
 | `persist_default_model` | `true` | When `false`, model changes stay session-only and do not rewrite managed `config.toml` model settings | `packages/agent-core/src/config/persist-default-model.ts`, `packages/agent-core-v2/src/app/kosongConfig/configSection.ts`, `packages/agent-core-v2/src/app/kosongConfig/kosongConfigService.ts` |
 | `agents_md_expand_includes` | `false` | When `true`, standalone `@path` lines in `AGENTS.md` are expanded at system-prompt assembly time (depth ≤ 5; missing/cycle/empty → HTML comments) | agent-core and agent-core-v2 profile context loaders; v2 `agentsMdExpandIncludes` config section |
 
@@ -71,7 +71,7 @@ There is intentionally no fork-only `/api/v1/usages` route. The quota UI must co
 | Item | URL | Status |
 | --- | --- | --- |
 | Issue: `disabled_skills` | https://github.com/MoonshotAI/kimi-code/issues/1982 | tracked upstream |
-| PR: `disabled_skills` | https://github.com/MoonshotAI/kimi-code/pull/1983 | tracked upstream; local port includes kap-server behavior |
+| PR: `disabled_skills` | https://github.com/MoonshotAI/kimi-code/pull/1983 | tracked upstream (head `95b77e4c`); local port includes kap-server behavior |
 | `subagent-model-selection` | https://github.com/MoonshotAI/kimi-code/pull/1841 | carried locally on top of upstream secondary-model |
 | Plan quota footer/sidebar | https://github.com/MoonshotAI/kimi-code/pull/1827 | UI behavior carried locally; backend uses current upstream OAuth route |
 | `agents_md_expand_includes` | — | fork-only; security/design review needed before upstreaming |

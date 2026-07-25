@@ -87,7 +87,7 @@ extra_skill_dirs = ["~/team-skills", ".agents/team-skills"]
 disabled_skills = ["review-helper", "legacy-helper"]
 ```
 
-Disabled names are case-insensitive. Matching Skills are removed from the model listing, rejected by the `Skill` tool, hidden from the slash menu, and blocked from user activation. Files remain on disk for other tools. After editing `config.toml`, run `/reload` or start a new session.
+Disabled names are case-insensitive. Matching Skills are removed from the model listing, rejected by the `Skill` tool, hidden from the slash menu, and blocked from user activation. A disabled Skill is also not injected by a plugin `sessionStart` hook — neither at session start nor after reload. Files remain on disk for other tools. After editing `config.toml`, run `/reload` or start a new session.
 
 This is stronger than frontmatter `disableModelInvocation: true` (which only blocks automatic model invocation while still allowing slash use) and stronger than a permission deny rule for `Skill(...)` (which can block the tool call but still leaves the Skill in the model listing).
 

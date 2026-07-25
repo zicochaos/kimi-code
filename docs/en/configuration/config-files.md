@@ -98,8 +98,8 @@ Fields in the config file fall into two categories: **top-level scalars** that d
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `default_model` | `string` | — | Default model alias; must be defined in `models` |
-| `persist_default_model` | `boolean` | `true` | When `false`, `/model` and default-model API updates apply only for the current process and do not rewrite `default_model` or `thinking` in `config.toml`. Other config writes still persist normally |
-| `agents_md_expand_includes` | `boolean` | `false` | When `true`, lines of the form `@path` inside AGENTS.md files are replaced with the target file contents at session start. Project-level includes must resolve inside the project root after symlinks are resolved; absolute paths, `..` traversal, and symlink escapes outside that root are blocked. User-level AGENTS.md files may include absolute paths because they are trusted user configuration. Nested includes are supported; blocked, missing, empty, or circular includes become HTML comments. Off by default so managed instruction files stay literal |
+| `persist_default_model` | `boolean` | `true` | When `false`, `/model` and default-model API updates apply only for the current process and do not rewrite `default_model` or `thinking` in `config.toml`. Managed login/provisioning (OAuth) still writes `default_model` during initial setup; the flag only affects later interactive changes. Other config writes still persist normally |
+| `agents_md_expand_includes` | `boolean` | `false` | When `true`, lines of the form `@path` inside AGENTS.md files are replaced with the target file contents at system prompt assembly. Project-level includes must resolve inside the project root after symlinks are resolved; absolute paths, `..` traversal, and symlink escapes outside that root are blocked. User-level AGENTS.md files may include absolute paths because they are trusted user configuration. Nested includes are supported (depth ≤ 5); blocked, missing, empty, or circular includes become HTML comments. Off by default so managed instruction files stay literal |
 | `default_permission_mode` | `string` | `manual` | Default permission mode for new sessions; one of `manual` (prompt each time), `yolo` (auto-approve tool actions, but the agent may still ask questions), or `auto` (fully autonomous — the agent decides everything without asking) |
 | `default_plan_mode` | `boolean` | `false` | Whether new sessions start in Plan mode (produce a plan before executing) by default |
 | `merge_all_available_skills` | `boolean` | `true` | Whether to merge Agent Skills from all available directories |
@@ -314,11 +314,12 @@ Like the `tools` / `disallowedTools` fields of an agent file, this section shape
 <!--
 ## `experimental`
 
-`experimental` stores persistent overrides for experimental-feature flags. Currently, `micro_compaction` is the only user-facing entry and defaults to `false`; set it to `true` to enable automatic trimming of older large tool results.
+`experimental` stores persistent overrides for experimental-feature flags. `micro_compaction` defaults to `false`; set it to `true` to enable automatic trimming of older large tool results. `subagent-model-selection` defaults to `false`; set it to `true` to allow exact configured model aliases on `Agent` / `AgentSwarm`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `micro_compaction` | `boolean` | `false` | Trim older large tool results from context while preserving recent conversation |
+| `subagent-model-selection` | `boolean` | `false` | Allow exact configured model aliases on `Agent` / `AgentSwarm` via optional `model` |
 -->
 
 ## `services`

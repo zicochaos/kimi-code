@@ -87,7 +87,7 @@ extra_skill_dirs = ["~/team-skills", ".agents/team-skills"]
 disabled_skills = ["review-helper", "legacy-helper"]
 ```
 
-名称匹配不区分大小写。被禁用的 Skill 会从模型列表中移除，被 `Skill` 工具拒绝，不出现在斜杠菜单中，也无法由用户激活。磁盘上的文件会保留，供其他工具使用。修改 `config.toml` 后执行 `/reload` 或开启新会话。
+名称匹配不区分大小写。被禁用的 Skill 会从模型列表中移除，被 `Skill` 工具拒绝，不出现在斜杠菜单中，也无法由用户激活。被禁用的 Skill 也不会由插件的 `sessionStart` hook 注入——无论是在会话启动时还是 reload 之后。磁盘上的文件会保留，供其他工具使用。修改 `config.toml` 后执行 `/reload` 或开启新会话。
 
 这比 frontmatter 的 `disableModelInvocation: true` 更强（后者只阻止模型自动调用，仍允许斜杠调用），也比针对 `Skill(...)` 的 permission deny 规则更强（后者可能拦截工具调用，但 Skill 仍会出现在模型列表中）。
 

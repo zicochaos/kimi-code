@@ -37,7 +37,7 @@ export KIMI_CODE_EXPERIMENTAL_SUBAGENT_MODEL_SELECTION=1
 
 启用后，`Agent` 与 `AgentSwarm` 的可选 `model` 参数除了上游次主力模型实验的 `primary` / `secondary` 之外，还接受精确的已配置模型 alias。主 Agent 会看到由安全、可物化的模型 alias 构成的目录。省略 `model` 时保持原有 secondary/primary 默认。恢复（resume）时可选 `model` 参数无效：默认 v1 引擎会把子 Agent 重新对齐到父 Agent 的 model alias，而 v2 引擎保留该子 Agent 在 journal 中已绑定的模型。
 
-目录最多展示 64 个 ASCII 安全的模型 alias，以及受限的非敏感元数据：已知 capabilities、上下文/输出上限，以及固定 thinking effort 取值 `off`、`on`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`。其他 alias 与元数据会被省略而非改写，因此展示的 alias 始终是确切的配置键。目录从不包含显示名、API key、base URL、自定义 header、provider 标识、provider 线模型名或 `passthrough` 配置。权限规则仍按语义上的 agent profile 名匹配；审批标签可为清晰起见附带所选模型。
+目录最多展示 64 个 ASCII 安全的模型 alias，以及受限的非敏感元数据：已知 capabilities、上下文/输出上限，以及固定 thinking effort 取值 `off`、`on`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`。其他 alias 与元数据会被省略而非改写，因此展示的 alias 始终是确切的配置键。`primary` 与 `secondary` 为保留名，不会作为精确 alias 出现在目录中。目录从不包含显示名、API key、base URL、自定义 header、provider 标识、provider 线模型名或 `passthrough` 配置。权限规则仍按语义上的 agent profile 名匹配；审批标签可为清晰起见附带所选模型。
 
 修改 `config.toml` 后请执行 `/reload`（或开新会话）。不同 provider/model 的价格、上下文窗口与能力可能不同，大批量委派前请核对相关配额与计费。
 

@@ -98,8 +98,8 @@ timeout = 5
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `default_model` | `string` | — | 默认模型别名，必须在 `models` 中定义 |
-| `persist_default_model` | `boolean` | `true` | 设为 `false` 时，`/model` 与默认模型 API 更新仅对当前进程生效，不会回写 `config.toml` 里的 `default_model` 或 `thinking`。其他配置写入仍正常持久化 |
-| `agents_md_expand_includes` | `boolean` | `false` | 设为 `true` 时，AGENTS.md 中形如 `@path` 的行会在会话启动时替换为目标文件内容。项目级 include 在解析 symlink 后必须仍位于项目根目录内；指向根目录外的绝对路径、`..` 遍历和 symlink 逃逸都会被阻止。用户级 AGENTS.md 属于受信任的用户配置，因此仍可 include 绝对路径。支持嵌套 include；被阻止、缺失、为空或循环引用的 include 会变成 HTML 注释。默认关闭，使托管指令文件保持字面内容 |
+| `persist_default_model` | `boolean` | `true` | 设为 `false` 时，`/model` 与默认模型 API 更新仅对当前进程生效，不会回写 `config.toml` 里的 `default_model` 或 `thinking`。托管登录/provisioning（OAuth）在初始配置时仍会写入 `default_model`；该标志仅影响之后的交互式更改。其他配置写入仍正常持久化 |
+| `agents_md_expand_includes` | `boolean` | `false` | 设为 `true` 时，AGENTS.md 中形如 `@path` 的行会在系统提示词组装时替换为目标文件内容。项目级 include 在解析 symlink 后必须仍位于项目根目录内；指向根目录外的绝对路径、`..` 遍历和 symlink 逃逸都会被阻止。用户级 AGENTS.md 属于受信任的用户配置，因此仍可 include 绝对路径。支持嵌套 include（深度 ≤ 5）；被阻止、缺失、为空或循环引用的 include 会变成 HTML 注释。默认关闭，使托管指令文件保持字面内容 |
 | `default_permission_mode` | `string` | `manual` | 新会话的默认权限模式，可选 `manual`（逐次询问）、`yolo`（自动批准工具操作，Agent 仍可能提问）、`auto`（完全自主，Agent 自己做决定，不再提问） |
 | `default_plan_mode` | `boolean` | `false` | 新会话是否默认以 Plan 模式（先出计划再执行）启动 |
 | `merge_all_available_skills` | `boolean` | `true` | 是否合并所有目录中的 Agent Skills |
@@ -314,11 +314,12 @@ disabled = ["EnterPlanMode", "ExitPlanMode", "mcp__github__*"]
 <!--
 ## `experimental`
 
-`experimental` 存放实验功能 flag 的持久化覆盖。目前 `micro_compaction` 是唯一用户可见的字段，默认值为 `false`；如需自动清理较旧的大型工具结果，把它设为 `true`。
+`experimental` 存放实验功能 flag 的持久化覆盖。`micro_compaction` 默认值为 `false`；如需自动清理较旧的大型工具结果，把它设为 `true`。`subagent-model-selection` 默认值为 `false`；设为 `true` 时允许 `Agent` / `AgentSwarm` 使用精确的已配置模型 alias。
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `micro_compaction` | `boolean` | `false` | 清理较旧的大型工具结果内容，同时保留最近对话 |
+| `subagent-model-selection` | `boolean` | `false` | 允许 `Agent` / `AgentSwarm` 通过可选 `model` 使用精确的已配置模型 alias |
 -->
 
 ## `services`
