@@ -488,6 +488,7 @@ export function configToTomlData(config: KimiConfig): Record<string, unknown> {
     'extraSkillDirs',
     'disabledSkills',
     'telemetry',
+    'persistDefaultModel',
   ];
   for (const key of scalarFields) {
     setDefined(out, camelToSnake(key), config[key]);

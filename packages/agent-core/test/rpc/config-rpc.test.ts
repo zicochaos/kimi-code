@@ -109,6 +109,103 @@ max_steps_per_turn = "nope"
   });
 });
 
+describe('KimiCore setKimiConfig persist_default_model', () => {
+  const PDM_TOML = `
+persist_default_model = false
+default_model = "disk-model"
+
+[thinking]
+effort = "high"
+
+[providers.p]
+type = "kimi"
+api_key = "k"
+
+[models.disk-model]
+provider = "p"
+model = "disk"
+max_context_size = 1000
+
+[models.session-model]
+provider = "p"
+model = "session"
+max_context_size = 1000
+`;
+
+  it('keeps model-only changes in process memory without writing disk', async () => {
+    const home = await makeHome(PDM_TOML);
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+    const before = await readFile(configPath, 'utf-8');
+
+    const runtime = await core.setKimiConfig({
+      defaultModel: 'session-model',
+      thinking: { effort: 'low' },
+    });
+
+    expect(runtime.defaultModel).toBe('session-model');
+    expect(runtime.thinking?.effort).toBe('low');
+    expect(runtime.persistDefaultModel).toBe(false);
+    expect(await readFile(configPath, 'utf-8')).toBe(before);
+    await expect(core.getKimiConfig({ reload: true })).resolves.toMatchObject({
+      defaultModel: 'session-model',
+      thinking: { effort: 'low' },
+    });
+  });
+
+  it('persists other fields while freezing the disk model and thinking', async () => {
+    const home = await makeHome(PDM_TOML);
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+
+    await core.setKimiConfig({ defaultModel: 'session-model', thinking: { effort: 'low' } });
+    const runtime = await core.setKimiConfig({
+      models: {
+        'disk-model': { provider: 'p', model: 'disk', maxContextSize: 1000 },
+        'session-model': { provider: 'p', model: 'session', maxContextSize: 1000 },
+        extra: { provider: 'p', model: 'extra', maxContextSize: 1000 },
+      },
+    });
+
+    expect(runtime.defaultModel).toBe('session-model');
+    expect(runtime.thinking?.effort).toBe('low');
+    expect(runtime.models?.['extra']).toBeDefined();
+    const text = await readFile(configPath, 'utf-8');
+    expect(text).toContain('default_model = "disk-model"');
+    expect(text).toMatch(/effort\s*=\s*"high"/);
+    expect(text).toMatch(/\[models\.extra\]/);
+  });
+
+  it('persists model-only changes when the flag is absent', async () => {
+    const home = await makeHome(PDM_TOML.replace('persist_default_model = false\n', ''));
+    const core = makeCore(home);
+
+    await core.setKimiConfig({ defaultModel: 'session-model' });
+
+    const text = await readFile(path.join(home, 'config.toml'), 'utf-8');
+    expect(text).toContain('default_model = "session-model"');
+  });
+
+  it('can disable then re-enable persistence without losing the live model preference', async () => {
+    const home = await makeHome(PDM_TOML.replace('persist_default_model = false', 'persist_default_model = true'));
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+
+    const disabled = await core.setKimiConfig({
+      persistDefaultModel: false,
+      defaultModel: 'session-model',
+    });
+    expect(disabled).toMatchObject({ persistDefaultModel: false, defaultModel: 'session-model' });
+    let text = await readFile(configPath, 'utf-8');
+    expect(text).toContain('default_model = "disk-model"');
+
+    const enabled = await core.setKimiConfig({ persistDefaultModel: true });
+    expect(enabled).toMatchObject({ persistDefaultModel: true, defaultModel: 'session-model' });
+    text = await readFile(configPath, 'utf-8');
+    expect(text).toContain('default_model = "session-model"');
+  });
+});
+
 describe('KimiCore imageLimits scoping', () => {
   it('two cores keep independent [image] limits and only follow their own reloads', async () => {
     const homeA = await makeHome(`${VALID_TOML}

@@ -25,7 +25,17 @@
  * unaffected.
  */
 
-import { IConfigService, IEventService, type Scope } from '@moonshot-ai/agent-core-v2';
+import {
+  ConfigTarget,
+  IConfigService,
+  IEventService,
+  type Scope,
+} from '@moonshot-ai/agent-core-v2';
+import {
+  DEFAULT_MODEL_SECTION,
+  PERSIST_DEFAULT_MODEL_SECTION,
+  THINKING_SECTION,
+} from '@moonshot-ai/agent-core-v2/app/kosongConfig/configSection';
 
 import { errEnvelope, okEnvelope } from '../envelope';
 import { requestLog } from '../lib/requestLog';
@@ -96,8 +106,44 @@ export function registerConfigRoutes(app: ConfigRouteHost, core: Scope): void {
           camelPatch['defaultPermissionMode'] = 'yolo';
         }
         delete camelPatch['yolo'];
+        const previousPersistDefaultModel =
+          config.get<boolean | undefined>(PERSIST_DEFAULT_MODEL_SECTION) ?? true;
+        const persistDefaultModel =
+          (camelPatch[PERSIST_DEFAULT_MODEL_SECTION] as boolean | undefined) ??
+          previousPersistDefaultModel;
+        const livePreferences = new Map(
+          [DEFAULT_MODEL_SECTION, THINKING_SECTION].map((domain) => [
+            domain,
+            config.get(domain),
+          ]),
+        );
         for (const domain of Object.keys(camelPatch)) {
-          await config.set(domain, camelPatch[domain]);
+          const patch = camelPatch[domain];
+          if (isModelPreferenceDomain(domain) && !persistDefaultModel) {
+            await config.replace(
+              domain,
+              mergeConfigValue(config.get(domain), patch),
+              ConfigTarget.Memory,
+            );
+            continue;
+          }
+          const hadMemoryValue = config.inspect(domain).memoryValue !== undefined;
+          await config.set(domain, patch, ConfigTarget.User);
+          if (isModelPreferenceDomain(domain) && hadMemoryValue) {
+            await config.replace(domain, undefined, ConfigTarget.Memory);
+          }
+        }
+        if (persistDefaultModel && !previousPersistDefaultModel) {
+          for (const domain of [DEFAULT_MODEL_SECTION, THINKING_SECTION]) {
+            if (domain in camelPatch) continue;
+            const value = livePreferences.get(domain);
+            if (value !== undefined) {
+              await config.replace(domain, value, ConfigTarget.User);
+            }
+            if (config.inspect(domain).memoryValue !== undefined) {
+              await config.replace(domain, undefined, ConfigTarget.Memory);
+            }
+          }
         }
         const response = toConfigResponse(config.getAll());
         const changedFields = Object.keys(req.body as Record<string, unknown>);
@@ -185,6 +231,14 @@ function nonEmpty(value: unknown): string | undefined {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isModelPreferenceDomain(domain: string): boolean {
+  return domain === DEFAULT_MODEL_SECTION || domain === THINKING_SECTION;
+}
+
+function mergeConfigValue(current: unknown, patch: unknown): unknown {
+  return isPlainObject(current) && isPlainObject(patch) ? { ...current, ...patch } : patch;
 }
 
 function convertKeysSnakeToCamel(obj: unknown): unknown {

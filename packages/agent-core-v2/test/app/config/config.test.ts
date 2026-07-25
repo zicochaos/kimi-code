@@ -29,17 +29,13 @@ import { ConfigRegistry, ConfigService } from '#/app/config/configService';
 import { SECONDARY_MODEL_FLAG_ID } from '#/session/subagent/flag';
 import '#/app/cron/configSection';
 import type { CronConfig } from '#/app/cron/configSection';
-import '#/app/skillCatalog/configSection';
 import {
   DISABLED_SKILLS_SECTION,
   EXTRA_SKILL_DIRS_SECTION,
   MERGE_ALL_AVAILABLE_SKILLS_SECTION,
 } from '#/app/skillCatalog/configSection';
-import '#/agent/permissionMode/configSection';
 import { DEFAULT_PERMISSION_MODE_SECTION } from '#/agent/permissionMode/configSection';
-import '#/agent/media/configSection';
 import { IMAGE_SECTION, type ImageConfig } from '#/agent/media/configSection';
-import '#/agent/loop/configSection';
 import {
   LOOP_CONTROL_SECTION,
   LOOP_MAX_RETRIES_PER_STEP_ENV,
@@ -48,10 +44,12 @@ import {
 } from '#/agent/loop/configSection';
 import {
   MODELS_SECTION,
+  PERSIST_DEFAULT_MODEL_SECTION,
   SECONDARY_MODEL_EFFORT_ENV,
   SECONDARY_MODEL_ENV,
   SECONDARY_MODEL_SECTION,
   THINKING_SECTION,
+  type SecondaryModelConfig,
 } from '#/app/kosongConfig/configSection';
 import { type ThinkingConfig } from '#/kosong/model/thinking';
 import {
@@ -62,7 +60,6 @@ import {
   type AgentTaskConfig,
 } from '#/agent/task/configSection';
 import { applyPrintModeConfigDefaults } from '#/agent/task/printDefaults';
-import '#/session/subagent/configSection';
 import {
   DEFAULT_SUBAGENT_TIMEOUT_MS,
   resolveSecondaryModel,
@@ -82,8 +79,6 @@ import {
   type ServicesConfig,
 } from '#/app/auth/configSection';
 import { SECONDARY_DERIVED_MODEL_ID } from '#/app/kosongConfig/secondaryModelOverlay';
-import { type SecondaryModelConfig } from '#/app/kosongConfig/configSection';
-import '#/agent/mcp/configSection';
 import {
   MCP_SECTION,
   MCP_STARTUP_TIMEOUT_ENV,
@@ -658,6 +653,16 @@ describe('skill config sections', () => {
     expect(registry.getSection(EXTRA_SKILL_DIRS_SECTION)?.defaultValue).toEqual([]);
     expect(registry.getSection(MERGE_ALL_AVAILABLE_SKILLS_SECTION)?.defaultValue).toBe(true);
     expect(registry.getSection(DISABLED_SKILLS_SECTION)?.defaultValue).toEqual([]);
+  });
+});
+
+describe('persistDefaultModel config section', () => {
+  it('is owner-registered with a true default and boolean validation', () => {
+    const registry = new ConfigRegistry();
+
+    expect(registry.getSection(PERSIST_DEFAULT_MODEL_SECTION)?.defaultValue).toBe(true);
+    expect(registry.validate(PERSIST_DEFAULT_MODEL_SECTION, false)).toBe(false);
+    expect(() => registry.validate(PERSIST_DEFAULT_MODEL_SECTION, 'false')).toThrow();
   });
 });
 

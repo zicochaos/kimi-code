@@ -184,6 +184,12 @@ export const MODELS_SECTION = 'models';
  */
 export const DEFAULT_MODEL_SECTION = 'defaultModel';
 
+export const PERSIST_DEFAULT_MODEL_SECTION = 'persistDefaultModel';
+
+registerConfigSection(PERSIST_DEFAULT_MODEL_SECTION, z.boolean(), {
+  defaultValue: true,
+});
+
 const ModelBaseSchema = z.object({
   providerId: z.string().optional(),
 

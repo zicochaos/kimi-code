@@ -14,17 +14,20 @@ import { resolveThinkingEffort } from '../agent/config/thinking';
 import { Agent } from '../agent';
 import { limitAgentReplayByTurns } from '../agent/replay/turns';
 import {
+  applyEnvModelConfig,
   applyPrintModeConfigDefaults,
   ensureKimiHome,
   loadRuntimeConfigSafe,
   mergeConfigPatch,
   migrateThinkingEffortMaxToHigh,
+  planConfigWrite,
   readConfigFileForUpdate,
   normalizeAdditionalDirs,
   readWorkspaceAdditionalDirs,
   resolveWorkspaceAdditionalDirs,
   resolveConfigPath,
   resolveKimiHome,
+  shouldPersistDefaultModel,
   writeConfigFile,
   type KimiConfig,
   type McpRemoteServerConfig,
@@ -673,8 +676,46 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }
 
   async setKimiConfig(input: SetKimiConfigPayload): Promise<KimiConfig> {
-    const config = mergeConfigPatch(this.readConfigForWrite(), input);
-    await writeConfigFile(this.configPath, config);
+    const disk = this.readConfigForWrite();
+    const base = shouldPersistDefaultModel(disk)
+      ? disk
+      : {
+          ...disk,
+          defaultModel: this.config.defaultModel,
+          thinking: this.config.thinking,
+        };
+    const merged = mergeConfigPatch(base, input);
+    const plan = planConfigWrite({ disk, patch: input, merged });
+
+    if (plan.write) {
+      await writeConfigFile(this.configPath, plan.configForDisk);
+    }
+
+    if (!plan.write) {
+      return this.setRuntimeConfig(
+        this.applyEnvModelConfigSafe({
+          ...merged,
+          raw: disk.raw ?? merged.raw,
+        }),
+      );
+    }
+
+    if (!shouldPersistDefaultModel(merged)) {
+      const loaded = loadRuntimeConfigSafe(this.configPath);
+      if (loaded.fileWarnings.length === 0) {
+        this.configWarnings = loaded.envWarnings;
+        return this.setRuntimeConfig(
+          this.applyEnvModelConfigSafe({
+            ...loaded.config,
+            defaultModel: merged.defaultModel,
+            thinking: merged.thinking,
+            persistDefaultModel: merged.persistDefaultModel,
+            raw: loaded.config.raw,
+          }),
+        );
+      }
+    }
+
     return this.reloadRuntimeConfig();
   }
 
@@ -1278,6 +1319,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }
 
   private reloadRuntimeConfig(): KimiConfig {
+    const previous = this.config;
     const loaded = loadRuntimeConfigSafe(this.configPath);
     if (loaded.fileWarnings.length > 0) {
       // Keep the last good config: adopting a salvaged config mid-run could
@@ -1293,7 +1335,23 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       return this.config;
     }
     this.configWarnings = loaded.envWarnings;
-    return this.setRuntimeConfig(loaded.config);
+    let next = loaded.config;
+    if (!shouldPersistDefaultModel(previous) || !shouldPersistDefaultModel(next)) {
+      next = {
+        ...next,
+        defaultModel: previous.defaultModel,
+        thinking: previous.thinking,
+      };
+    }
+    return this.setRuntimeConfig(next);
+  }
+
+  private applyEnvModelConfigSafe(config: KimiConfig): KimiConfig {
+    try {
+      return applyEnvModelConfig(config, process.env);
+    } catch {
+      return config;
+    }
   }
 
   private setRuntimeConfig(config: KimiConfig): KimiConfig {
