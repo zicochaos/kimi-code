@@ -186,7 +186,7 @@ export function formatSubagentModelDirectory({
 
 function selectableSubagentModelAliases(models: Readonly<Record<string, ModelRecord>>): string[] {
   return Object.keys(models)
-    .filter(isSafeAlias)
+    .filter((alias) => isSafeAlias(alias) && !isSubagentModelChoiceToken(alias))
     .toSorted((left, right) => (left < right ? -1 : left > right ? 1 : 0))
     .slice(0, MAX_DIRECTORY_MODELS);
 }

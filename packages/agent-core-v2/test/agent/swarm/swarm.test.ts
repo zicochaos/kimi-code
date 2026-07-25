@@ -147,10 +147,10 @@ function stubCallerProfile(
   } as unknown as IAgentProfileService;
 }
 
-function stubModels(): IModelService {
+function stubModels(models: ReturnType<IModelService['list']> = {}): IModelService {
   return {
     _serviceBrand: undefined,
-    list: () => ({}),
+    list: () => models,
   } as unknown as IModelService;
 }
 
@@ -864,9 +864,9 @@ describe('AgentSwarmTool', () => {
     );
   });
 
-  it('resolves spawn task bindings from the configured secondary model', async () => {
+  it('keeps "secondary" as the upstream choice when a configured alias collides', async () => {
     const host = mockSwarmHost();
-    const tool = new AgentSwarmTool(host.swarmService, makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }), mockSwarmMode(), stubConfig({ model: 'provider/secondary', defaultEffort: 'low' }), stubFlag(true), stubSwarmCatalog(), stubCallerProfile({ modelAlias: 'main-model', thinkingLevel: 'high' }), stubModels(), stubModelCatalog());
+    const tool = new AgentSwarmTool(host.swarmService, makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }), mockSwarmMode(), stubConfig({ model: 'provider/secondary', defaultEffort: 'low' }), stubFlag(true), stubSwarmCatalog(), stubCallerProfile({ modelAlias: 'main-model', thinkingLevel: 'high' }), stubModels({ secondary: { model: 'provider/configured-secondary' } }), stubModelCatalog());
 
     await executeTool(
       tool,
@@ -874,6 +874,7 @@ describe('AgentSwarmTool', () => {
         description: 'Review files',
         prompt_template: 'Review {{item}}',
         items: ['src/a.ts', 'src/b.ts'],
+        model: 'secondary',
       }),
     );
 
@@ -887,7 +888,7 @@ describe('AgentSwarmTool', () => {
     );
   });
 
-  it('lets the tool call opt back into the primary model', async () => {
+  it('keeps "primary" as the upstream choice when a configured alias collides', async () => {
     const host = mockSwarmHost();
     const secondaryCoder: AgentProfile = {
       name: 'coder',
@@ -895,7 +896,7 @@ describe('AgentSwarmTool', () => {
       modelPreference: 'secondary',
       systemPrompt: () => 'coder',
     };
-    const tool = new AgentSwarmTool(host.swarmService, makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }), mockSwarmMode(), stubConfig({ model: 'provider/secondary', defaultEffort: 'low' }), stubFlag(true), stubSwarmCatalog(DEFAULT_CALLER_PROFILE, [secondaryCoder]), stubCallerProfile({ modelAlias: 'main-model', thinkingLevel: 'high' }), stubModels(), stubModelCatalog());
+    const tool = new AgentSwarmTool(host.swarmService, makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }), mockSwarmMode(), stubConfig({ model: 'provider/secondary', defaultEffort: 'low' }), stubFlag(true), stubSwarmCatalog(DEFAULT_CALLER_PROFILE, [secondaryCoder]), stubCallerProfile({ modelAlias: 'main-model', thinkingLevel: 'high' }), stubModels({ primary: { model: 'provider/configured-primary' } }), stubModelCatalog());
 
     await executeTool(
       tool,
@@ -915,6 +916,15 @@ describe('AgentSwarmTool', () => {
         ],
       }),
     );
+  });
+
+  it('does not advertise reserved choice tokens as exact configured aliases', () => {
+    const host = mockSwarmHost();
+    const tool = new AgentSwarmTool(host.swarmService, makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }), mockSwarmMode(), stubConfig(), stubFlag(true), stubSwarmCatalog(), stubCallerProfile({ modelAlias: 'main-model' }), stubModels({ primary: { model: 'provider/primary' }, secondary: { model: 'provider/secondary' }, alternate: { model: 'provider/alternate' } }), stubModelCatalog());
+
+    expect(tool.description).toContain('- "alternate"');
+    expect(tool.description).not.toContain('- "primary"');
+    expect(tool.description).not.toContain('- "secondary"');
   });
 
   it('advertises both selectable models in the description only when configured', async () => {

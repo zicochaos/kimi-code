@@ -2,9 +2,15 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { Emitter } from '../../src/base/common/event';
+import type { KimiConfig } from '../../src/config';
 import { KimiCore } from '../../src/rpc/core-impl';
+import type { ICoreProcessService } from '../../src/services/coreProcess/coreProcess';
+import type { IEventService } from '../../src/services/event/event';
+import { ConfigService } from '../../src/services/config/configService';
+import type { Event } from '@moonshot-ai/protocol';
 
 const tempDirs: string[] = [];
 
@@ -203,6 +209,66 @@ max_context_size = 1000
     expect(enabled).toMatchObject({ persistDefaultModel: true, defaultModel: 'session-model' });
     text = await readFile(configPath, 'utf-8');
     expect(text).toContain('default_model = "session-model"');
+  });
+});
+
+describe('legacy ConfigService fork config projection', () => {
+  it('retains fork config booleans in GET, POST, and config-changed events', async () => {
+    const config = {
+      providers: {},
+      persistDefaultModel: false,
+      agentsMdExpandIncludes: true,
+    } as KimiConfig;
+    const getKimiConfig = vi.fn(async () => config);
+    const setKimiConfig = vi.fn(async (patch: Record<string, unknown>) => ({
+      ...config,
+      ...patch,
+    }));
+    const core = {
+      _serviceBrand: undefined,
+      rpc: { getKimiConfig, setKimiConfig } as unknown as ICoreProcessService['rpc'],
+      ready: async () => {},
+      dispose: () => {},
+    } satisfies ICoreProcessService;
+    const emitter = new Emitter<Event>();
+    const events: Event[] = [];
+    const eventService = {
+      _serviceBrand: undefined,
+      onDidPublish: emitter.event,
+      publish: (event: Event) => {
+        events.push(event);
+        emitter.fire(event);
+      },
+    } satisfies IEventService;
+    const service = new ConfigService(core, eventService);
+
+    await expect(service.get()).resolves.toMatchObject({
+      persist_default_model: false,
+      agents_md_expand_includes: true,
+    });
+
+    const updated = await service.set({
+      persist_default_model: true,
+      agents_md_expand_includes: false,
+    });
+    expect(setKimiConfig).toHaveBeenCalledWith({
+      persistDefaultModel: true,
+      agentsMdExpandIncludes: false,
+    });
+    expect(updated).toMatchObject({
+      persist_default_model: true,
+      agents_md_expand_includes: false,
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'event.config.changed',
+        changed_fields: ['persist_default_model', 'agents_md_expand_includes'],
+        config: expect.objectContaining({
+          persist_default_model: true,
+          agents_md_expand_includes: false,
+        }),
+      }),
+    );
   });
 });
 

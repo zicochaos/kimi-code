@@ -29,6 +29,22 @@ export interface SubagentModelDirectoryOptions {
   readonly currentModel?: string;
 }
 
+export function filterResolvableSubagentModels(
+  models: Readonly<Record<string, ModelAlias>>,
+  resolve: (alias: string) => unknown,
+): Readonly<Record<string, ModelAlias>> {
+  return Object.fromEntries(
+    Object.entries(models).filter(([alias]) => {
+      try {
+        resolve(alias);
+        return true;
+      } catch {
+        return false;
+      }
+    }),
+  );
+}
+
 export function parametersWithSubagentModelSelection(
   parameters: Record<string, unknown>,
   enabled: boolean,

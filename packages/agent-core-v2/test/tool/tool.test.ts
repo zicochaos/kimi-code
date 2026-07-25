@@ -9,7 +9,11 @@ import { ILogService } from '#/_base/log/log';
 import { IFlagService } from '#/app/flag/flag';
 import { MASTER_ENV } from '#/app/flag/flagService';
 import { toInputJsonSchema } from '#/tool/input-schema';
-import { parametersWithSubagentModelSelection } from '#/tool/subagentModelSelection/modelDirectory';
+import {
+  formatSubagentModelDirectory,
+  isSelectableSubagentModelAlias,
+  parametersWithSubagentModelSelection,
+} from '#/tool/subagentModelSelection/modelDirectory';
 import { userCancellationReason } from '#/_base/utils/abort';
 import { createHooks } from '#/hooks';
 import type { ToolCall } from '#/kosong/contract/message';
@@ -517,6 +521,24 @@ describe('AgentToolInputSchema', () => {
   });
 });
 
+describe('subagent model directory', () => {
+  it('excludes reserved choice tokens from exact configured aliases', () => {
+    const models = {
+      primary: { model: 'provider/primary' },
+      secondary: { model: 'provider/secondary' },
+      alternate: { model: 'provider/alternate' },
+    };
+
+    const directory = formatSubagentModelDirectory({ models });
+
+    expect(directory).toContain('- "alternate"');
+    expect(directory).not.toContain('- "primary"');
+    expect(directory).not.toContain('- "secondary"');
+    expect(isSelectableSubagentModelAlias(models, 'primary')).toBe(false);
+    expect(isSelectableSubagentModelAlias(models, 'secondary')).toBe(false);
+  });
+});
+
 describe('Agent tool description', () => {
   let ctx: TestAgentContext;
 
@@ -530,6 +552,40 @@ describe('Agent tool description', () => {
     expect(tool).toBeDefined();
     return tool!.description;
   }
+
+  it('does not advertise reserved choice tokens as exact configured aliases', () => {
+    ctx = createTestAgent(
+      appService(IFlagService, stubFlag((id) => id === 'subagent-model-selection')),
+      modelProviderServices(modelCatalogResolving('mock-model', 'primary', 'secondary', 'alternate')),
+      {
+        initialConfig: {
+          models: {
+            primary: {
+              provider: 'test',
+              model: 'provider/primary',
+              maxContextSize: 128_000,
+            },
+            secondary: {
+              provider: 'test',
+              model: 'provider/secondary',
+              maxContextSize: 128_000,
+            },
+            alternate: {
+              provider: 'test',
+              model: 'provider/alternate',
+              maxContextSize: 128_000,
+            },
+          },
+        },
+      },
+    );
+
+    const description = agentDescription();
+
+    expect(description).toContain('- "alternate"');
+    expect(description).not.toContain('- "primary"');
+    expect(description).not.toContain('- "secondary"');
+  });
 
   it('explains the fixed background subagent timeout', () => {
     ctx = createTestAgent();
@@ -1122,14 +1178,34 @@ describe('Agent tool execution contract', () => {
     );
   });
 
-  it('spawns on the caller model when the tool call opts into "primary"', async () => {
+  it('keeps "primary" as the upstream choice when a configured alias collides', async () => {
     const lifecycle = createAgentLifecycleStub({ createAgentIds: ['agent-child'] });
     const context = createAgentToolContext(
       lifecycle,
-      secondaryModelFlags(),
+      appService(
+        IFlagService,
+        stubFlag(
+          (id) => id === SECONDARY_MODEL_FLAG_ID || id === 'subagent-model-selection',
+        ),
+      ),
+      modelProviderServices(
+        modelCatalogResolving(
+          'mock-model',
+          'provider/secondary',
+          SECONDARY_DERIVED_MODEL_ID,
+          'primary',
+        ),
+      ),
       {
         initialConfig: {
           secondaryModel: { model: 'provider/secondary', defaultEffort: 'low' },
+          models: {
+            primary: {
+              provider: 'test',
+              model: 'provider/configured-primary',
+              maxContextSize: 128_000,
+            },
+          },
         },
       },
     );

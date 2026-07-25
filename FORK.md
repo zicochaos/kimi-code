@@ -106,7 +106,8 @@ Then `kimi -c` can continue the previous healthy session for that workdir.
 - Upstream `secondary-model` remains the foundation for `primary`/`secondary` and `[secondary_model]`.
 - Fork `subagent-model-selection` adds exact aliases under a separate experimental flag (default off).
 - Permission matching uses the semantic profile name; display labels may include the model for clarity.
-- Resumed subagents keep their own model (v2); do not rebind on resume from the parent tool args.
+- Resume model semantics differ by engine: v1 realigns the child to the parent model alias (tool-call `model` is ignored); v2 keeps the journal-bound model and does not rebind from parent tool args.
+- Known limitations left open: legacy model directory still reserves the tokens `primary` / `secondary` (M-3), and the subagent model directory does not live-reload after config changes without a new session or equivalent restart (M-4).
 
 ### A port dropped a feature
 

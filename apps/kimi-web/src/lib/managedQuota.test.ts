@@ -37,13 +37,18 @@ describe('managedQuota', () => {
       );
     });
 
-    it('falls back to raw model name when id misses', () => {
+    it('falls back to raw model name when id misses and match is unique', () => {
       expect(providerForActiveModel('gpt-4o', models)).toBe('openai');
     });
 
     it('prefers id match over colliding model names', () => {
       // Both managed and moonshot expose model "kimi-k2.5"; id wins.
       expect(providerForActiveModel('moonshot/kimi-k2.5', models)).toBe('moonshot');
+    });
+
+    it('returns undefined when raw model name collides across providers', () => {
+      // Ambiguous raw name must not silently pick managed or custom.
+      expect(providerForActiveModel('kimi-k2.5', models)).toBeUndefined();
     });
 
     it('returns undefined for empty/unknown models', () => {

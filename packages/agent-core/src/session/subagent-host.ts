@@ -6,7 +6,8 @@ import {
 
 import type { Agent } from '../agent';
 import type { PromptOrigin } from '../agent/context';
-import { ErrorCodes, KimiError } from '../errors';import { DenyAllPermissionPolicy } from '../agent/permission/policies/deny-all';
+import { DenyAllPermissionPolicy } from '../agent/permission/policies/deny-all';
+import { ErrorCodes, KimiError } from '../errors';
 import { InMemoryAgentRecordPersistence } from '../agent/records';
 import { isAbortError } from '../loop/errors';
 import {
@@ -112,7 +113,7 @@ export interface RunSubagentOptions {
   readonly parentToolCallUuid?: string;
   readonly prompt: string;
   readonly description: string;
-  /** Exact configured alias for a new spawn. Ignored on resume (child keeps its model after parent realign). */
+  /** Exact configured alias for a new spawn. Ignored on resume; v1 realigns the child to the parent model alias. */
   readonly modelAlias?: string;
   readonly swarmIndex?: number;
   readonly runInBackground: boolean;

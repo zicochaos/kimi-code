@@ -41,6 +41,7 @@ import {
   wsEventEnvelopeSchema,
 } from '../ws-control';
 import { createAsyncApiDocument } from '../asyncapi';
+import { configResponseSchema, patchConfigRequestSchema } from '../rest/config';
 import { z } from 'zod';
 
 const TS = '2026-06-04T10:30:00.000Z';
@@ -73,6 +74,27 @@ describe('ws-control — generic envelopes', () => {
     expect(parsed.epoch).toBe('ep_01ABC');
   });
 
+  it('config schemas retain fork config booleans', () => {
+    const config = configResponseSchema.parse({
+      providers: {},
+      persist_default_model: false,
+      agents_md_expand_includes: true,
+    });
+    const patch = patchConfigRequestSchema.parse({
+      persist_default_model: true,
+      agents_md_expand_includes: false,
+    });
+
+    expect(config).toMatchObject({
+      persist_default_model: false,
+      agents_md_expand_includes: true,
+    });
+    expect(patch).toEqual({
+      persist_default_model: true,
+      agents_md_expand_includes: false,
+    });
+  });
+
   it('sessionEventMessageSchema accepts a config-changed frame', () => {
     const parsed = sessionEventMessageSchema.parse({
       type: 'event.config.changed',
@@ -84,12 +106,22 @@ describe('ws-control — generic envelopes', () => {
         type: 'event.config.changed',
         agentId: 'main',
         sessionId: '__global__',
-        changed_fields: ['disabled_skills'],
-        config: { providers: {}, disabled_skills: ['review-helper'] },
+        changed_fields: ['persist_default_model', 'agents_md_expand_includes'],
+        config: {
+          providers: {},
+          persist_default_model: false,
+          agents_md_expand_includes: true,
+        },
       },
     });
 
-    expect(parsed.payload.type).toBe('event.config.changed');
+    expect(parsed.payload).toMatchObject({
+      type: 'event.config.changed',
+      config: {
+        persist_default_model: false,
+        agents_md_expand_includes: true,
+      },
+    });
   });
 
   it('wsControlEnvelopeSchema accepts an id-less message', () => {

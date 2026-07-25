@@ -37,7 +37,8 @@ export function isManagedUsageProvider(
 
 /**
  * Resolve the provider of the active model from status.modelId + the catalog.
- * Prefer exact id match; fall back to raw model name (display names collide).
+ * Prefer exact id match; fall back to raw model name only when that match is
+ * unique — ambiguous managed/custom collisions hide quota rather than guess.
  */
 export function providerForActiveModel(
   modelId: string | null | undefined,
@@ -46,9 +47,12 @@ export function providerForActiveModel(
   if (modelId === null || modelId === undefined || modelId.length === 0) {
     return undefined;
   }
-  const matched =
-    models.find((m) => m.id === modelId) ?? models.find((m) => m.model === modelId);
-  return matched?.provider;
+  const byId = models.find((m) => m.id === modelId);
+  if (byId !== undefined) return byId.provider;
+
+  const byRawName = models.filter((m) => m.model === modelId);
+  if (byRawName.length === 1) return byRawName[0]?.provider;
+  return undefined;
 }
 
 /** Severity thresholds shared with the TUI footer (0.5 warn / 0.85 danger). */

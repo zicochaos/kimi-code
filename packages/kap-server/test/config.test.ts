@@ -97,6 +97,28 @@ describe('server-v2 /api/v1/config default_permission_mode + yolo', () => {
     expect(after.yolo).toBe(false);
   });
 
+  it('GET and POST retain fork config booleans', async () => {
+    await boot('persist_default_model = false\nagents_md_expand_includes = false\n');
+
+    const initial = await getConfig();
+    expect(initial.persist_default_model).toBe(false);
+    expect(initial.agents_md_expand_includes).toBe(false);
+
+    const updated = await patchConfig({
+      persist_default_model: true,
+      agents_md_expand_includes: true,
+    });
+    expect(updated.persist_default_model).toBe(true);
+    expect(updated.agents_md_expand_includes).toBe(true);
+
+    const after = await getConfig();
+    expect(after.persist_default_model).toBe(true);
+    expect(after.agents_md_expand_includes).toBe(true);
+    const text = await readFile(join(home as string, 'config.toml'), 'utf-8');
+    expect(text).toContain('persist_default_model = true');
+    expect(text).toContain('agents_md_expand_includes = true');
+  });
+
   it('keeps default_model and thinking in memory when persistence is disabled', async () => {
     const initial = `
 persist_default_model = false

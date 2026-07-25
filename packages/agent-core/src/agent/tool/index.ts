@@ -19,6 +19,7 @@ import { resolveSubagentTimeoutMs } from '../../session/subagent-host';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
 import { fingerprint } from '../llm-request-logger';
 import * as b from '../../tools/builtin';
+import { filterResolvableSubagentModels } from '../../tools/support/subagent-model-directory';
 import type { ToolStore, ToolStoreData, ToolStoreKey } from '../../tools/store';
 import type {
   BuiltinTool,
@@ -834,7 +835,10 @@ export class ToolManager {
               log: this.agent.log,
               subagentTimeoutMs: resolveSubagentTimeoutMs(this.agent.kimiConfig?.subagent?.timeoutMs),
               modelDirectory: () => ({
-                models: this.agent.kimiConfig?.models,
+                models: filterResolvableSubagentModels(
+                  this.agent.kimiConfig?.models ?? {},
+                  (alias) => this.agent.modelProvider?.resolveProviderConfig(alias),
+                ),
                 currentModel: this.agent.config.modelAlias,
               }),
               modelSelectionEnabled: subagentModelSelectionEnabled,
@@ -847,7 +851,10 @@ export class ToolManager {
             this.agent.swarmMode,
             resolveSubagentTimeoutMs(this.agent.kimiConfig?.subagent?.timeoutMs),
             () => ({
-              models: this.agent.kimiConfig?.models,
+              models: filterResolvableSubagentModels(
+                this.agent.kimiConfig?.models ?? {},
+                (alias) => this.agent.modelProvider?.resolveProviderConfig(alias),
+              ),
               currentModel: this.agent.config.modelAlias,
             }),
             subagentModelSelectionEnabled,
