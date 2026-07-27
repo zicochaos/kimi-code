@@ -38,6 +38,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { sessionEventMessageSchema } from '../src/protocol/ws-control';
 import {
+  type BroadcastDelivery,
   type BroadcastTarget,
   SessionEventBroadcaster,
 } from '../src/transport/ws/v1/sessionEventBroadcaster';
@@ -383,9 +384,23 @@ function agentEvent(type: string, extra: Record<string, unknown> = {}): AgentEve
   return { type, ...extra } as unknown as AgentEvent;
 }
 
-function collectingTarget(): { target: BroadcastTarget; envelopes: EventEnvelope[] } {
+function collectingTarget(): {
+  target: BroadcastTarget;
+  envelopes: EventEnvelope[];
+  deliveries: BroadcastDelivery[];
+} {
   const envelopes: EventEnvelope[] = [];
-  return { target: { send: (e) => envelopes.push(e) }, envelopes };
+  const deliveries: BroadcastDelivery[] = [];
+  return {
+    target: {
+      send: (envelope, delivery = 'subscription') => {
+        envelopes.push(envelope);
+        deliveries.push(delivery);
+      },
+    },
+    envelopes,
+    deliveries,
+  };
 }
 
 // A real turn yields the event loop between `turn.started` and `turn.ended`,
@@ -426,7 +441,7 @@ describe('SessionEventBroadcaster', () => {
     const main = lc.addAgent('main');
     sessions.set('s1', lc);
 
-    const { target, envelopes } = collectingTarget();
+    const { target, envelopes, deliveries } = collectingTarget();
     expect(await bc.subscribe('s1', target)).toBe(true);
 
     main.bus.emit(agentEvent('turn.started', { turnId: 1 }));
@@ -452,6 +467,16 @@ describe('SessionEventBroadcaster', () => {
     });
     expect(envelopes.every((e) => e.epoch === envelopes[0]!.epoch)).toBe(true);
     expect(durable[1]!.volatile).toBeUndefined();
+    expect(
+      envelopes.flatMap((envelope, index) =>
+        envelope.volatile === true ? [] : [[envelope.type, deliveries[index]]],
+      ),
+    ).toEqual([
+      ['turn.started', 'subscription'],
+      ['event.session.work_changed', 'immediate'],
+      ['turn.ended', 'subscription'],
+      ['event.session.work_changed', 'immediate'],
+    ]);
   });
 
   it('fans out volatile events with the current watermark + offset, not journaled', async () => {
@@ -926,6 +951,7 @@ describe('SessionEventBroadcaster', () => {
         type: 'event.session.created',
         session_id: 's1',
       });
+      expect(globalView.deliveries).toEqual(['immediate']);
     });
 
     it('delivers work_changed to a global-only target while a subscriber drives the session', async () => {
@@ -1732,6 +1758,7 @@ describe('SessionEventBroadcaster', () => {
           session_id: 's1',
           payload: { agent_id: 'main', has_more_older: false, snapshot: { items: [] } },
         });
+        expect(view.deliveries).toEqual(['subscription']);
       }
       expect(transcriptEnvelopes(plainView.envelopes)).toHaveLength(0);
 

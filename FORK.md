@@ -2,9 +2,9 @@
 
 This file tracks **what diverges from upstream** (`MoonshotAI/kimi-code`) so rebases do not drop local product behavior. Update it whenever a fork-only feature is added, restored, or abandoned.
 
-**Upstream base we track:** `@moonshot-ai/kimi-code@0.29.1` / `main@origin` `c497af60e6cd20aab05e590f98a28fb15dd3491d`  
+**Upstream base we track:** `@moonshot-ai/kimi-code@0.29.2` / `main@origin` `77618e38c35a81e26134b3f83eb7f2b460c0ee05`  
 **Local main tip:** see `jj log -r main`  
-**Backup before this safe port:** bookmark `backup/pre-0.29.1` at `117f60d4816926a68e7d584f5d6f04e9dcd66411`
+**Backup before this safe port:** bookmark `backup/pre-0.29.2-port` at `b01dc627cad94603a0246339ec527504690f7968`
 
 ## How to rebase without losing options
 
@@ -118,6 +118,7 @@ If something disappears after syncing origin, compare against `backup/pre-*` and
 | Bookmark | Meaning |
 | --- | --- |
 | `main` | Shipping fork tip |
-| `main@origin` | Upstream tip (`c497af60…`) |
-| `backup/pre-0.29.1` | Pre-port local tip at `117f60d4816926a68e7d584f5d6f04e9dcd66411` |
+| `main@origin` | Upstream tip (`77618e38…`, post-0.29.2) |
+| `backup/pre-0.29.2-port` | Pre-port local tip at `b01dc627cad94603a0246339ec527504690f7968` |
+| `backup/pre-0.29.1` | Older pre-0.29.1 local tip at `117f60d4816926a68e7d584f5d6f04e9dcd66411` |
 | `feat/disabled-skills` | Branch for upstream PR #1983; keep untouched during fork ports |

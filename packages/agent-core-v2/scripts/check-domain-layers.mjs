@@ -159,6 +159,7 @@ const DOMAIN_LAYER = new Map([
   ['modelCatalog', 3],
   ['agentProfileCatalog', 3],
   ['agentFileCatalog', 3],
+  ['hostIdentity', 3],
   // L4 — agent behaviour
   // `activityView` is the Agent-scope read model folding the agent's own event
   // bus into the activity projection (`agent.activity.updated`); it owns no
@@ -227,6 +228,11 @@ const DOMAIN_LAYER = new Map([
   ['sessionExport', 6],
   ['interaction', 6],
   ['sessionMetadata', 6],
+  // `undo` owns the undo pipeline (quiesce → context.undo → reconcile): it
+  // coordinates L4 agent domains (loop / prompt / contextMemory /
+  // fullCompaction), L5 task delivery, and `sessionMetadata`, so it sits in
+  // L6 beside the other cross-agent coordinators.
+  ['undo', 6],
   ['sessionActivity', 6],
   ['session', 6],
   ['terminal', 6],
