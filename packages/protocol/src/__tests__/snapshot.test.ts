@@ -127,6 +127,7 @@ describe('rest/snapshot — session snapshot', () => {
           parent_tool_call_id: 'call_1',
           swarm_index: 0,
           run_in_background: false,
+          model: 'example/test-model',
         },
         {
           id: 'agent_2',
@@ -147,6 +148,7 @@ describe('rest/snapshot — session snapshot', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.subagents).toHaveLength(2);
+      expect(result.data.subagents?.[0]?.model).toBe('example/test-model');
       expect(result.data.subagents?.[0]?.parent_tool_call_id).toBe('call_1');
       expect(result.data.subagents?.[1]?.subagent_phase).toBe('completed');
     }

@@ -33,7 +33,7 @@
  * window); a same-name rebind keeps the persisted thinking effort unless the
  * caller explicitly overrides it. `refreshSystemPrompt` never rejects: a
  * failed context build keeps the current prompt and surfaces a warning,
- * because the `[tools]` config watcher fires it voided (an unhandled
+ * because config and skill-catalog watchers fire it voided (an unhandled
  * rejection would crash kap-server) and the Session tool-policy fan-out
  * awaits it across agents. Tool-policy entries that can never activate
  * anything (typo'd names, wildcards without the `mcp__` prefix, incomplete
@@ -94,6 +94,10 @@ import { IWireService } from '#/wire/wire';
 import type { PayloadOf } from '#/wire/types';
 import { IEventBus } from '#/app/event/eventBus';
 import { IHostIdentity } from '#/app/hostIdentity/hostIdentity';
+import {
+  AGENTS_MD_EXPAND_INCLUDES_SECTION,
+  type AgentsMdExpandIncludes,
+} from './configSection';
 import { prepareSystemPromptContext } from './context';
 import type {
   ApplyProfileOptions,
@@ -217,6 +221,11 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
           this.publishToolPatternWarnings();
           void this.refreshSystemPrompt();
         }
+      }),
+    );
+    this._register(
+      this.skillCatalog.onDidChange(() => {
+        void this.refreshSystemPrompt();
       }),
     );
   }
@@ -834,11 +843,16 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     options?: ApplyProfileOptions,
   ): Promise<SystemPromptContext> {
     const effectiveCwd = cwd ?? this.sessionContext.cwd;
+    const expandIncludes =
+      this.config.get<AgentsMdExpandIncludes>(AGENTS_MD_EXPAND_INCLUDES_SECTION) === true;
     const base = await prepareSystemPromptContext(
-      { fs: this.fs, homeDir: this.env.homeDir },
+      { fs: this.fs, homeDir: this.env.homeDir, pathClass: this.env.pathClass },
       effectiveCwd,
       this.bootstrap.homeDir,
-      { additionalDirs: options?.additionalDirs ?? this.workspace.additionalDirs },
+      {
+        additionalDirs: options?.additionalDirs ?? this.workspace.additionalDirs,
+        expandIncludes,
+      },
     );
     const skills = await this.resolveSkillListing();
     return {

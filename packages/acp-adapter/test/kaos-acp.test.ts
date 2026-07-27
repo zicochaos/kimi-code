@@ -71,6 +71,7 @@ interface MockInnerKaos extends Kaos {
     chdirCalls: string[];
     withCwdCalls: string[];
     withEnvCalls: Array<Record<string, string>>;
+    realpathCalls: string[];
     statCalls: Array<{ path: string; options?: { followSymlinks?: boolean } }>;
     iterdirCalls: string[];
     globCalls: Array<{ path: string; pattern: string; options?: { caseSensitive?: boolean } }>;
@@ -93,6 +94,7 @@ function makeMockInner(opts?: { pathClass?: 'posix' | 'win32' }): MockInnerKaos 
     chdirCalls: [] as string[],
     withCwdCalls: [] as string[],
     withEnvCalls: [] as Array<Record<string, string>>,
+    realpathCalls: [] as string[],
     statCalls: [] as Array<{ path: string; options?: { followSymlinks?: boolean } }>,
     iterdirCalls: [] as string[],
     globCalls: [] as Array<{ path: string; pattern: string; options?: { caseSensitive?: boolean } }>,
@@ -138,6 +140,10 @@ function makeMockInner(opts?: { pathClass?: 'posix' | 'win32' }): MockInnerKaos 
       spy.withEnvCalls.push(env);
       const child = makeMockInner();
       return child;
+    },
+    realpath: async (path: string) => {
+      spy.realpathCalls.push(path);
+      return `/real${path}`;
     },
     stat: async (path: string, options?: { followSymlinks?: boolean }) => {
       spy.statCalls.push({ path, options });
@@ -492,16 +498,18 @@ describe('AcpKaos', () => {
       expect(inner.__spy.getcwdCalls).toBe(1);
     });
 
-    it('delegates chdir, stat, mkdir to inner', async () => {
+    it('delegates chdir, realpath, stat, mkdir to inner', async () => {
       const conn = makeMockConn({});
       const inner = makeMockInner();
       const kaos = new AcpKaos(conn.asConn(), 's1', inner);
 
       await kaos.chdir('/x');
+      await expect(kaos.realpath('/link')).resolves.toBe('/real/link');
       await kaos.stat('/y', { followSymlinks: false });
       await kaos.mkdir('/z', { parents: true });
 
       expect(inner.__spy.chdirCalls).toEqual(['/x']);
+      expect(inner.__spy.realpathCalls).toEqual(['/link']);
       expect(inner.__spy.statCalls).toEqual([{ path: '/y', options: { followSymlinks: false } }]);
       expect(inner.__spy.mkdirCalls).toEqual([{ path: '/z', options: { parents: true } }]);
     });

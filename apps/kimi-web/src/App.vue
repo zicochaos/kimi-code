@@ -735,6 +735,8 @@ function openPr(url: string): void {
         :unread-by-session="client.unreadBySession.value"
         :workspace-sort-mode="client.workspaceSortMode.value"
         :backend="client.backend.value"
+        :model-id="client.status.value.modelId"
+        :models="client.models.value"
         @select="client.selectSession($event)"
         @create="handleCreateSession"
         @create-in-workspace="handleCreateSessionInWorkspace($event)"

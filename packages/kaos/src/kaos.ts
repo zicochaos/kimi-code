@@ -44,6 +44,8 @@ export interface Kaos {
    * mutate a stable record to update future executions.
    */
   withEnv(env: Record<string, string>): Kaos;
+  /** Resolve `path` to its canonical absolute path, following symlinks. */
+  realpath(path: string): Promise<string>;
   /** Return stat metadata for `path`. */
   stat(path: string, options?: { followSymlinks?: boolean }): Promise<StatResult>;
   /** Yield entry names in the directory at `path`. */

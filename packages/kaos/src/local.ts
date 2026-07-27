@@ -7,6 +7,7 @@ import {
   open,
   readdir,
   readFile,
+  realpath,
   stat,
   writeFile,
 } from 'node:fs/promises';
@@ -266,6 +267,10 @@ export class LocalKaos implements Kaos {
       throw new Error(`Not a directory: ${resolved}`);
     }
     this._cwd = resolved;
+  }
+
+  async realpath(path: string): Promise<string> {
+    return normalize(await realpath(this._resolvePath(path)));
   }
 
   async stat(path: string, options?: { followSymlinks?: boolean }): Promise<StatResult> {

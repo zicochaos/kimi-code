@@ -216,7 +216,10 @@ function buildHost(key: string): {
   host.stub(ISessionContext, createSessionContextStub());
   host.stub(ISessionWorkspaceContext, stubUnused());
   host.stub(ISessionAgentProfileCatalog, stubUnused());
-  host.stub(ISessionSkillCatalog, stubUnused());
+  host.stub(ISessionSkillCatalog, {
+    _serviceBrand: undefined,
+    onDidChange: () => ({ dispose: () => {} }),
+  } as unknown as ISessionSkillCatalog);
   host.stub(ISessionToolPolicy, {
     _serviceBrand: undefined,
     ready: Promise.resolve(),

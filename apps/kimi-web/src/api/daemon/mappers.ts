@@ -4,11 +4,14 @@
 
 import type {
   AppApprovalRequest,
+  AppBoosterWallet,
   AppConfig,
   AppEvent,
   AppGoal,
+  AppManagedUsageResult,
   AppModel,
   AppProvider,
+  AppUsageRow,
   FsEntry,
   AppMessage,
   AppMessageContent,
@@ -34,6 +37,7 @@ import type {
   WireTask,
   WireFsEntry,
   WireImageSource,
+  WireManagedUsage,
   WireMessage,
   WireMessageContent,
   WireModel,
@@ -46,6 +50,7 @@ import type {
   WireQuestionResponse,
   WireSession,
   WireSessionUsage,
+  WireUsageRow,
   WireWorkspace,
   WireEvent,
   WireConfig,
@@ -384,6 +389,7 @@ export function toAppTask(wire: WireTask): AppTask {
     // subagent it returns is a background subagent (foreground ones never
     // persist there) — hence the `?? true` fallback for that path.
     runInBackground: wire.run_in_background ?? (wire.kind === 'subagent' ? true : undefined),
+    model: wire.model,
     // outputLines starts undefined; populated by eventReducer via task.progress events
   };
 }
@@ -750,6 +756,44 @@ export function toAppProvider(wire: WireProvider): AppProvider {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Managed usage (`GET /oauth/usage`) — snake_case wire → camelCase app
+// ---------------------------------------------------------------------------
+
+function toAppUsageRow(wire: WireUsageRow): AppUsageRow {
+  return {
+    label: wire.label,
+    used: wire.used,
+    limit: wire.limit,
+    resetHint: wire.reset_hint,
+  };
+}
+
+function toAppBoosterWallet(
+  wire: NonNullable<Extract<WireManagedUsage, { kind: 'ok' }>['extra_usage']>,
+): AppBoosterWallet {
+  return {
+    balanceCents: wire.balance_cents,
+    totalCents: wire.total_cents,
+    monthlyChargeLimitEnabled: wire.monthly_charge_limit_enabled,
+    monthlyChargeLimitCents: wire.monthly_charge_limit_cents,
+    monthlyUsedCents: wire.monthly_used_cents,
+    currency: wire.currency,
+  };
+}
+
+export function toAppManagedUsage(wire: WireManagedUsage): AppManagedUsageResult {
+  if (wire.kind === 'error') {
+    return { kind: 'error', message: wire.message, status: wire.status };
+  }
+  return {
+    kind: 'ok',
+    summary: wire.summary === null ? null : toAppUsageRow(wire.summary),
+    limits: wire.limits.map(toAppUsageRow),
+    extraUsage: wire.extra_usage === null ? null : toAppBoosterWallet(wire.extra_usage),
+  };
+}
+
 export function toAppConfig(wire: WireConfig): AppConfig {
   const providers: Record<string, { type: string; baseUrl?: string; defaultModel?: string; hasApiKey: boolean }> = {};
   for (const [id, provider] of Object.entries(wire.providers)) {
@@ -775,6 +819,7 @@ export function toAppConfig(wire: WireConfig): AppConfig {
     services: wire.services,
     mergeAllAvailableSkills: wire.merge_all_available_skills,
     extraSkillDirs: wire.extra_skill_dirs,
+    disabledSkills: wire.disabled_skills,
     loopControl: wire.loop_control,
     background: wire.background,
     experimental: wire.experimental,

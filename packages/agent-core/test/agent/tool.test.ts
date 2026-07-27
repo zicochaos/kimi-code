@@ -271,6 +271,38 @@ describe('Agent tools', () => {
     expect(ctx.agent.tools.loopTools.some((tool) => tool.name === 'AgentSwarm')).toBe(true);
   });
 
+  it('advertises only materializable configured model aliases to subagents', () => {
+    const ctx = testAgent({
+      initialConfig: {
+        providers: {
+          valid: { type: 'kimi', apiKey: 'key' },
+        },
+        defaultModel: 'valid',
+        models: {
+          valid: {
+            provider: 'valid',
+            model: 'valid-model',
+            maxContextSize: 128_000,
+          },
+          invalid: {
+            provider: 'missing',
+            model: 'invalid-model',
+            maxContextSize: 128_000,
+          },
+        },
+      },
+      subagentHost: {} as unknown as SessionSubagentHost,
+      experimentalFlags: new FlagResolver({}, FLAG_DEFINITIONS, {
+        'subagent-model-selection': true,
+      }),
+    });
+    ctx.configure({ tools: ['Agent'] });
+
+    const agentTool = ctx.agent.tools.loopTools.find((tool) => tool.name === 'Agent');
+    expect(agentTool?.description).toContain('- "valid"');
+    expect(agentTool?.description).not.toContain('- "invalid"');
+  });
+
   it('self-heals the builtin tool table when the provider becomes resolvable after construction', () => {
     // The ProviderManager reads this live config; it starts with no model or
     // provider, so hasProvider is false at Agent construction and

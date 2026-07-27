@@ -25,11 +25,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { ILogService, type LogPayload } from '#/_base/log/log';
+import { ConfigTarget } from '#/app/config/config';
 import {
   DEFAULT_MODEL_SECTION,
   DEFAULT_PROVIDER_SECTION,
   MODELS_SECTION,
+  PERSIST_DEFAULT_MODEL_SECTION,
   PROVIDERS_SECTION,
+  SECONDARY_MODEL_SECTION,
 } from '#/app/kosongConfig/configSection';
 import { type ModelRecord } from '#/kosong/model/model';
 import { ModelService } from '#/kosong/model/modelService';
@@ -156,6 +159,40 @@ describe('KosongConfigService kosong → config persistence', () => {
         k2: { provider: 'kimi', model: 'kimi-k2.5', maxContextSize: 2000 },
       });
       expect(config.get<string>(DEFAULT_MODEL_SECTION)).toBe('k2');
+    } finally {
+      bridge.dispose();
+    }
+  });
+
+  it('keeps default-model changes in memory when persistence is disabled', async () => {
+    const { config, models, bridge } = await createBridge({
+      ...seededSections,
+      [PERSIST_DEFAULT_MODEL_SECTION]: false,
+      [SECONDARY_MODEL_SECTION]: { model: 'k1' },
+    });
+    try {
+      const replaceSpy = vi.spyOn(config, 'replace');
+
+      await models.set('k2', { provider: 'kimi', model: 'kimi-k2.5', maxContextSize: 2000 });
+      await models.setDefaultModel('k2');
+
+      expect(replaceSpy).toHaveBeenCalledWith(DEFAULT_MODEL_SECTION, 'k2', ConfigTarget.Memory);
+      expect(config.get<string>(DEFAULT_MODEL_SECTION)).toBe('k2');
+      expect(config.get(SECONDARY_MODEL_SECTION)).toEqual({ model: 'k1' });
+    } finally {
+      bridge.dispose();
+    }
+  });
+
+  it('uses user persistence by default for default-model changes', async () => {
+    const { config, models, bridge } = await createBridge(seededSections);
+    try {
+      const replaceSpy = vi.spyOn(config, 'replace');
+
+      await models.set('k2', { provider: 'kimi', model: 'kimi-k2.5', maxContextSize: 2000 });
+      await models.setDefaultModel('k2');
+
+      expect(replaceSpy).toHaveBeenCalledWith(DEFAULT_MODEL_SECTION, 'k2', ConfigTarget.User);
     } finally {
       bridge.dispose();
     }
@@ -400,7 +437,11 @@ describe('KosongConfigService env-pinned default pointer', () => {
 
       // The write landed in the user layer, but the pinned effective view
       // did not move, and the bridge reconciled the registry back to the pin.
-      expect(replaceSpy).toHaveBeenCalledWith(DEFAULT_MODEL_SECTION, 'k1');
+      expect(replaceSpy).toHaveBeenCalledWith(
+        DEFAULT_MODEL_SECTION,
+        'k1',
+        ConfigTarget.User,
+      );
       expect(models.getDefaultModel()).toBe('env-model');
     } finally {
       bridge.dispose();

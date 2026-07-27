@@ -332,6 +332,7 @@ export interface AppTask {
    *  the dock: the dock lists background subagents, while foreground subagents
    *  render inline in the message flow as the `Agent` tool card. */
   runInBackground?: boolean;
+  model?: string;
   /** The id this same subagent has in the server's background-task store
    *  (REST `/tasks`), learned from the `task.started` registration event. The
    *  WS event stream keys the agent by agent id while REST keys it by task id;
@@ -672,6 +673,7 @@ export interface AppConfig {
   services?: unknown;
   mergeAllAvailableSkills?: boolean;
   extraSkillDirs?: string[];
+  disabledSkills?: string[];
   loopControl?: unknown;
   background?: unknown;
   experimental?: Record<string, boolean>;
@@ -801,7 +803,40 @@ export interface KimiWebApi {
   } | null>;
   cancelOAuthLogin(): Promise<{ cancelled: boolean; status: string }>;
   logout(): Promise<{ loggedOut: boolean }>;
+  /**
+   * Managed plan quota (5h / weekly windows) — `GET /oauth/usage`.
+   * Pass the active managed provider id (e.g. `managed:kimi-code`).
+   */
+  getManagedUsage(provider?: string): Promise<AppManagedUsageResult>;
 }
+
+/** Managed-platform quota row (weekly summary, rolling 5h limit, …). */
+export interface AppUsageRow {
+  label: string;
+  used: number;
+  limit: number;
+  resetHint?: string;
+}
+
+/** Booster wallet — pay-as-you-go balance beyond the subscription quota. */
+export interface AppBoosterWallet {
+  balanceCents: number;
+  totalCents: number;
+  monthlyChargeLimitEnabled: boolean;
+  monthlyChargeLimitCents: number;
+  monthlyUsedCents: number;
+  currency: string;
+}
+
+/** Result of `getManagedUsage()`, snake_case wire → camelCase app. */
+export type AppManagedUsageResult =
+  | {
+      kind: 'ok';
+      summary: AppUsageRow | null;
+      limits: AppUsageRow[];
+      extraUsage: AppBoosterWallet | null;
+    }
+  | { kind: 'error'; message: string; status?: number };
 
 /** Result of `startOAuthLogin()`, mirroring the wire discriminated union. */
 export type OAuthLoginStartResult =

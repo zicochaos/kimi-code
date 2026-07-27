@@ -12,6 +12,7 @@ import {
   type ConfigDiagnostic,
   type ConfigInspectValue,
   IConfigService,
+  type ConfigTarget,
   type ResolvedConfig,
 } from '#/app/config/config';
 import type { IModelOAuthTokens } from '#/kosong/model/modelOAuth';
@@ -47,7 +48,7 @@ export class StubConfigService implements IConfigService {
     return Object.fromEntries(this._values) as ResolvedConfig;
   }
 
-  set(domain: string, patch: unknown): Promise<void> {
+  set(domain: string, patch: unknown, _target?: ConfigTarget): Promise<void> {
     const previousValue = this._values.get(domain);
     const value =
       patch !== null && typeof patch === 'object'
@@ -58,7 +59,7 @@ export class StubConfigService implements IConfigService {
     return Promise.resolve();
   }
 
-  replace(domain: string, value: unknown): Promise<void> {
+  replace(domain: string, value: unknown, _target?: ConfigTarget): Promise<void> {
     const previousValue = this._values.get(domain);
     if (value === undefined) {
       this._values.delete(domain);

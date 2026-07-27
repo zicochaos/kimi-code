@@ -184,6 +184,7 @@ export class SessionSwarmService implements ISessionSwarmService {
       description: options.description,
       swarmIndex: options.swarmIndex,
       runInBackground: options.runInBackground,
+      model: binding.model,
     });
     const promptText = await applyProfilePromptPrefix(profile, options.prompt, {
       cwd: this.sessionContext.cwd,
@@ -207,8 +208,8 @@ export class SessionSwarmService implements ISessionSwarmService {
     const caller = this.requireHandle(callerAgentId, 'Caller agent');
     const child = this.requireHandle(agentId, 'Agent instance');
     this.requireIdleSubagent(agentId, child);
-    const profileName =
-      child.accessor.get(IAgentProfileService).data().profileName ?? RESUMED_PROFILE_FALLBACK;
+    const childProfile = child.accessor.get(IAgentProfileService).data();
+    const profileName = childProfile.profileName ?? RESUMED_PROFILE_FALLBACK;
     if (!retryTurn) {
       emitAgentRunSpawned(caller, agentId, {
         profileName,
@@ -217,6 +218,7 @@ export class SessionSwarmService implements ISessionSwarmService {
         description: options.description,
         swarmIndex: options.swarmIndex,
         runInBackground: options.runInBackground,
+        model: childProfile.modelAlias,
       });
     }
     const request = retryTurn

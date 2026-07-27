@@ -581,6 +581,10 @@ export class SSHKaos implements Kaos {
     this._cwd = resolved;
   }
 
+  async realpath(path: string): Promise<string> {
+    return sftpRealpath(this._sftp, this._resolvePath(path));
+  }
+
   async stat(path: string, options?: { followSymlinks?: boolean }): Promise<StatResult> {
     const resolved = this._resolvePath(path);
     const followSymlinks = options?.followSymlinks ?? true;

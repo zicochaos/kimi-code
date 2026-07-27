@@ -524,6 +524,7 @@ export interface SessionStateSnapshot {
     }, rawArgs: string, context?: {
       readonly sessionId?: string;
     }) => string;
+    isSkillDisabled: (name: string) => boolean;
     listSkills: () => readonly /* SkillDefinition — packages/agent-core-v2/src/app/skillCatalog/types.ts */ {
       readonly name: string;
       readonly description: string;

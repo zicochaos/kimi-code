@@ -22,6 +22,7 @@ function spawn(subagentId: string, extra: Record<string, unknown> = {}): Event {
     description: `task ${subagentId}`,
     swarmIndex: 0,
     runInBackground: false,
+    model: 'example/test-model',
     ...extra,
   });
 }
@@ -43,6 +44,7 @@ describe('SubagentRosterTracker', () => {
         parent_tool_call_id: 'tc_swarm_1',
         swarm_index: 2,
         run_in_background: false,
+        model: 'example/test-model',
       }),
     ]);
   });

@@ -22,6 +22,25 @@ Each dispatch is presented in the terminal as an approval request (unless it mat
 
 Sub-agents support running in the background: results are automatically returned to the main Agent upon completion, with no manual polling needed. You can also call back an existing sub-agent instance to continue the same task.
 
+Choosing an exact configured model alias for delegated work is experimental and disabled by default. Enable it persistently in `config.toml`:
+
+```toml
+[experimental]
+subagent-model-selection = true
+```
+
+To enable it only for the current process, set the dedicated environment variable instead:
+
+```sh
+export KIMI_CODE_EXPERIMENTAL_SUBAGENT_MODEL_SELECTION=1
+```
+
+When enabled, `Agent` and `AgentSwarm` accept exact configured model aliases via the optional `model` parameter, in addition to the upstream `primary` / `secondary` choices from the secondary-model experiment. The calling Agent sees a directory built from safe, materializable model aliases in your configuration. Omit `model` to keep the normal secondary/primary default. On resume, the optional `model` argument is ignored: the default v1 engine realigns the child to the parent model alias, while the v2 engine keeps the model already bound in that subagent's journal.
+
+The directory exposes up to 64 ASCII-safe model aliases plus a restricted set of non-sensitive metadata: known capabilities, context/output limits, and only the fixed thinking-effort values `off`, `on`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Other aliases and metadata values are omitted rather than rewritten, so every displayed alias remains an exact configuration key. `primary` and `secondary` are reserved and do not appear as exact aliases in the directory. The directory never includes display names, API keys, base URLs, custom headers, provider identifiers, provider wire model names, or `passthrough` configuration. Permission rules still match the semantic agent profile name; the approval label may show the selected model for clarity.
+
+After changing `config.toml`, run `/reload` (or start a new session). Because providers and models can differ in price, context-window size, and capabilities, check the relevant provider's pricing and limits before delegating large batches.
+
 ## Context Isolation and Resource Cost
 
 Each sub-agent has a fully independent context window. It can only see the task description explicitly passed by the main Agent and cannot see the main Agent's conversation history. The sub-agent's own intermediate reasoning and tool call records do not flow back; only the final result appears in the main Agent's context.
@@ -109,7 +128,7 @@ The body is the agent's system prompt, and it is rendered as a template each tim
 
 Unknown fields are ignored, so newer files stay readable by older versions. Fields from other agent tools (such as Claude Code's `model` or OpenCode's `mode`) are ignored the same way, the comma-separated `tools` form keeps Claude Code-style agent files loadable, and a missing `name` falls back to the file name so OpenCode-style files load too — a minimal file with `description` and a body works across tools.
 
-`model_preference` applies only to newly spawned subagents when the secondary-model experiment is enabled. Under `kimi web`, set `KIMI_CODE_EXPERIMENTAL_SECONDARY_MODEL=1`; under experimental `kimi -p`, the required `KIMI_CODE_EXPERIMENTAL_FLAG=1` also enables it. The TUI currently ignores this field. It never names a concrete model alias, and resumed subagents keep their existing model. The selected preference is shown to the main agent alongside the profile description so it can still pass an explicit `model` when a task needs a different choice.
+`model_preference` applies only to newly spawned subagents when the secondary-model experiment is enabled. Under `kimi web`, set `KIMI_CODE_EXPERIMENTAL_SECONDARY_MODEL=1`; under experimental `kimi -p`, the required `KIMI_CODE_EXPERIMENTAL_FLAG=1` also enables it. The TUI currently ignores this field. It never names a concrete model alias. Resume does not re-apply `model_preference`: v1 realigns the child to the parent model alias, and v2 keeps the journal-bound model. The selected preference is shown to the main agent alongside the profile description so it can still pass an explicit `model` when a task needs a different choice.
 
 A file with invalid content discovered in a directory is skipped with a warning and does not affect other files. A file passed explicitly via `--agent-file` must be valid — otherwise the CLI reports the error and exits.
 

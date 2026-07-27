@@ -334,6 +334,7 @@ export interface WireTask {
   suspended_reason?: string;
   swarm_index?: number;
   run_in_background?: boolean;
+  model?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +416,7 @@ export interface WireConfig {
   services?: unknown;
   merge_all_available_skills?: boolean;
   extra_skill_dirs?: string[];
+  disabled_skills?: string[];
   loop_control?: unknown;
   background?: unknown;
   experimental?: Record<string, boolean>;
@@ -481,6 +483,35 @@ export interface WireOAuthCancelResult {
 export interface WireLogoutResult {
   logged_out: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Managed usage wire DTOs (`GET /oauth/usage`) — snake_case via toWireUsage
+// ---------------------------------------------------------------------------
+
+export interface WireUsageRow {
+  label: string;
+  used: number;
+  limit: number;
+  reset_hint?: string;
+}
+
+export interface WireBoosterWallet {
+  balance_cents: number;
+  total_cents: number;
+  monthly_charge_limit_enabled: boolean;
+  monthly_charge_limit_cents: number;
+  monthly_used_cents: number;
+  currency: string;
+}
+
+export type WireManagedUsage =
+  | {
+      kind: 'ok';
+      summary: WireUsageRow | null;
+      limits: WireUsageRow[];
+      extra_usage: WireBoosterWallet | null;
+    }
+  | { kind: 'error'; message: string; status?: number };
 
 // ---------------------------------------------------------------------------
 // File upload wire DTOs

@@ -100,6 +100,8 @@ export interface SessionSkillConfig {
   readonly pluginSkillRoots?: readonly SkillRoot[];
   readonly mergeAllAvailableSkills?: boolean;
   readonly builtinDir?: string;
+  /** Skill names from config `disabled_skills` (case-insensitive). */
+  readonly disabledSkills?: readonly string[];
 }
 
 export interface AgentMeta {
@@ -229,6 +231,7 @@ export class Session {
     this.pluginCommands = options.pluginCommands ?? [];
     this.skills = new SessionSkillRegistry({
       sessionId: options.id,
+      disabledSkills: options.skills?.disabledSkills,
     });
     this.mcp = new McpConnectionManager({
       oauthService: new McpOAuthService({ kimiHomeDir: options.kimiHomeDir }),
@@ -673,7 +676,10 @@ export class Session {
     const context = await prepareSystemPromptContext(
       this.systemContextKaos(agent.kaos.getcwd()),
       this.options.kimiHomeDir,
-      { additionalDirs: this.additionalDirs },
+      {
+        additionalDirs: this.additionalDirs,
+        expandIncludes: this.options.config?.agentsMdExpandIncludes === true,
+      },
     );
     agent.useProfile(profile, context, this.options.kimiHomeDir);
     const { agentsMdWarning } = context;
@@ -712,7 +718,10 @@ export class Session {
       const context = await prepareSystemPromptContext(
         this.systemContextKaos(this.toolKaos.getcwd()),
         this.options.kimiHomeDir,
-        { additionalDirs: this.additionalDirs },
+        {
+          additionalDirs: this.additionalDirs,
+          expandIncludes: this.options.config?.agentsMdExpandIncludes === true,
+        },
       );
       this.agentsMdWarning = context.agentsMdWarning;
     } catch (error) {
@@ -736,7 +745,9 @@ export class Session {
       });
       await handle.completion;
 
-      const agentsMd = await loadAgentsMd(mainAgent.kaos, this.options.kimiHomeDir);
+      const agentsMd = await loadAgentsMd(mainAgent.kaos, this.options.kimiHomeDir, {
+        expandIncludes: this.options.config?.agentsMdExpandIncludes === true,
+      });
       mainAgent.context.appendSystemReminder(initCompletionReminder(agentsMd), {
         kind: 'injection',
         variant: 'init',
@@ -757,7 +768,6 @@ export class Session {
    * persisted and visible on the wire. Used by the explicit `/reload` flow after
    * the session has been re-resumed with reloaded plugin state.
    *
-   * When no plugin session start is currently resolvable but an earlier
    * When no plugin session start is currently resolvable but the context may still
    * carry stale plugin guidance — either an earlier `<plugin_session_start>`
    * reminder, or a compaction summary that may have folded one in — appends a
@@ -956,7 +966,10 @@ export class Session {
         prepareSystemPromptContext(
           this.systemContextKaos(agent.kaos.getcwd()),
           this.options.kimiHomeDir,
-          { additionalDirs: agent.getAdditionalDirs() },
+          {
+            additionalDirs: agent.getAdditionalDirs(),
+            expandIncludes: this.options.config?.agentsMdExpandIncludes === true,
+          },
         ),
     });
     return agent;

@@ -19,6 +19,7 @@ import { resolveSubagentTimeoutMs } from '../../session/subagent-host';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
 import { fingerprint } from '../llm-request-logger';
 import * as b from '../../tools/builtin';
+import { filterResolvableSubagentModels } from '../../tools/support/subagent-model-directory';
 import type { ToolStore, ToolStoreData, ToolStoreKey } from '../../tools/store';
 import type {
   BuiltinTool,
@@ -771,7 +772,14 @@ export class ToolManager {
       this.enabledTools.has('TaskOutput') &&
       this.enabledTools.has('TaskStop');
     const goalToolsEnabled = this.agent.type === 'main';
-    this.builtinTools = new Map(
+    const subagentModelSelectionEnabled = (): boolean =>
+      this.agent.experimentalFlags.enabled('subagent-model-selection');
+    const resolveSubagentModelAlias = (requestedModelAlias?: string): string | undefined => {
+      const modelAlias = requestedModelAlias ?? this.agent.config.modelAlias;
+      if (modelAlias !== undefined) this.agent.modelProvider?.resolveProviderConfig(modelAlias);
+      return modelAlias;
+    };
+        this.builtinTools = new Map(
       [
         new b.ReadTool(kaos, workspace),
         new b.WriteTool(kaos, workspace),
@@ -826,6 +834,15 @@ export class ToolManager {
               allowBackground,
               log: this.agent.log,
               subagentTimeoutMs: resolveSubagentTimeoutMs(this.agent.kimiConfig?.subagent?.timeoutMs),
+              modelDirectory: () => ({
+                models: filterResolvableSubagentModels(
+                  this.agent.kimiConfig?.models ?? {},
+                  (alias) => this.agent.modelProvider?.resolveProviderConfig(alias),
+                ),
+                currentModel: this.agent.config.modelAlias,
+              }),
+              modelSelectionEnabled: subagentModelSelectionEnabled,
+              resolveModelAlias: resolveSubagentModelAlias,
             },
           ),
         this.agent.subagentHost &&
@@ -833,6 +850,15 @@ export class ToolManager {
             this.agent.subagentHost,
             this.agent.swarmMode,
             resolveSubagentTimeoutMs(this.agent.kimiConfig?.subagent?.timeoutMs),
+            () => ({
+              models: filterResolvableSubagentModels(
+                this.agent.kimiConfig?.models ?? {},
+                (alias) => this.agent.modelProvider?.resolveProviderConfig(alias),
+              ),
+              currentModel: this.agent.config.modelAlias,
+            }),
+            subagentModelSelectionEnabled,
+            resolveSubagentModelAlias,
           ),
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),

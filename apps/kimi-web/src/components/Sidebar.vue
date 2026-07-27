@@ -21,7 +21,9 @@ import {
 } from '../lib/storage';
 import { moveInOrder, type DropPosition, type WorkspaceSortMode } from '../lib/workspaceOrder';
 import type { Session, WorkspaceGroup as WorkspaceGroupType, WorkspaceView } from '../types';
+import type { AppModel } from '../api/types';
 import SearchSessionsDialog from './dialogs/SearchSessionsDialog.vue';
+import QuotaCard from './QuotaCard.vue';
 import WorkspaceGroup from './WorkspaceGroup.vue';
 import { isMacosDesktop } from '../lib/desktopFlag';
 import IconButton from './ui/IconButton.vue';
@@ -86,6 +88,10 @@ const props = withDefaults(
     /** True while the resize handle is dragged — disables the width transition
      *  so the sidebar follows the pointer 1:1. */
     dragging?: boolean;
+    /** Active model id (status.modelId) — drives the managed QuotaCard. */
+    modelId?: string;
+    /** Model catalog used to resolve the provider of modelId. */
+    models?: readonly AppModel[];
   }>(),
   {
     activeWorkspace: null,
@@ -97,6 +103,8 @@ const props = withDefaults(
     colWidth: 220,
     collapsed: false,
     dragging: false,
+    modelId: '',
+    models: () => [],
   },
 );
 
@@ -712,6 +720,9 @@ onBeforeUnmount(() => {
           <Kbd :keys="sessionSearchKeys" />
         </button>
       </div>
+
+      <!-- Plan quota — managed 5h/weekly indicator above the session list -->
+      <QuotaCard :model-id="modelId" :models="models" />
 
       <!-- Session list — grouped by workspace -->
       <div class="sessions" @scroll="onSessionsScroll">

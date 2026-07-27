@@ -109,6 +109,8 @@ Prompt mode exits with code `0` when the goal completes, `3` when it blocks, and
 | `/version` | — | Display the Kimi Code CLI version number | Yes |
 | `/feedback` | — | Submit feedback with optional diagnostic logs and codebase context | Yes |
 
+When the active model uses the managed Kimi Code provider, its rolling 5-hour and weekly quota stays visible in the TUI footer and the web sidebar. `/usage` and `/status` also refresh the footer values.
+
 ## Exit
 
 | Command | Alias | Description | Always available |

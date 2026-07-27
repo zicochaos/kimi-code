@@ -7,6 +7,7 @@ import { traceKeyEvent } from '../../debug/trace';
 import type {
   AppConfig,
   AppGoal,
+  AppManagedUsageResult,
   AppMessage,
   AppMessageRole,
   AppModel,
@@ -42,6 +43,7 @@ import {
   toAppEvent,
   toAppFsEntry,
   toAppGoal,
+  toAppManagedUsage,
   toAppMessage,
   toAppModel,
   toAppProvider,
@@ -65,6 +67,7 @@ import type {
   WireFsEntry,
   WireFsHomeResult,
   WireGoalSnapshot,
+  WireManagedUsage,
   WireMessage,
   WireModel,
   WireOAuthCancelResult,
@@ -1275,6 +1278,7 @@ export class DaemonKimiWebApi implements KimiWebApi {
       services: 'services',
       mergeAllAvailableSkills: 'merge_all_available_skills',
       extraSkillDirs: 'extra_skill_dirs',
+      disabledSkills: 'disabled_skills',
       loopControl: 'loop_control',
       background: 'background',
       experimental: 'experimental',
@@ -1357,6 +1361,13 @@ export class DaemonKimiWebApi implements KimiWebApi {
   async logout(): Promise<{ loggedOut: boolean }> {
     const data = await this.http.post<WireLogoutResult>('/oauth/logout', {});
     return { loggedOut: data.logged_out };
+  }
+
+  async getManagedUsage(provider?: string): Promise<AppManagedUsageResult> {
+    const data = await this.http.get<WireManagedUsage>('/oauth/usage', {
+      provider,
+    });
+    return toAppManagedUsage(data);
   }
 
   // -------------------------------------------------------------------------

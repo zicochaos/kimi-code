@@ -33,7 +33,11 @@ import { LifecycleScope, ScopeActivation, registerScopedService } from '#/_base/
 import { ILogService } from '#/_base/log/log';
 import { retryBackoffDelays, sleepForRetry } from '#/_base/utils/retry';
 
-import { type ConfigSectionChangedEvent, IConfigService } from '#/app/config/config';
+import {
+  type ConfigSectionChangedEvent,
+  ConfigTarget,
+  IConfigService,
+} from '#/app/config/config';
 import { describeUnknownError } from '#/app/config/configPure';
 import { deepEqual } from '#/app/config/sectionDiff';
 import { IModelService, type ModelsSection } from '#/kosong/model/model';
@@ -44,6 +48,7 @@ import {
   DEFAULT_MODEL_SECTION,
   DEFAULT_PROVIDER_SECTION,
   MODELS_SECTION,
+  PERSIST_DEFAULT_MODEL_SECTION,
   PROVIDERS_SECTION,
 } from './configSection';
 
@@ -87,7 +92,11 @@ export class KosongConfigService extends Disposable implements IKosongConfigServ
       this.config.get<ModelsSection>(MODELS_SECTION) ?? {},
       this.config.get<string>(DEFAULT_MODEL_SECTION),
     );
-    this._register(this.config.onDidSectionChange((e) => this.onConfigSectionChanged(e)));
+    this._register(
+      this.config.onDidSectionChange((e) => {
+        this.onConfigSectionChanged(e);
+      }),
+    );
     // The guards mirror the ones inside the persist tasks: skipping the echo
     // here (instead of registering a no-op `waitUntil`) keeps config-originated
     // syncs fully synchronous for every other listener, even while the persist
@@ -152,12 +161,16 @@ export class KosongConfigService extends Disposable implements IKosongConfigServ
       case DEFAULT_PROVIDER_SECTION:
         void this.providers
           .setDefaultProvider(e.value as string | undefined)
-          .catch((error) => this.logPersistFailure(error));
+          .catch((error) => {
+            this.logPersistFailure(error);
+          });
         break;
       case DEFAULT_MODEL_SECTION:
         void this.models
           .setDefaultModel(e.value as string | undefined)
-          .catch((error) => this.logPersistFailure(error));
+          .catch((error) => {
+            this.logPersistFailure(error);
+          });
         break;
     }
   }
@@ -185,7 +198,15 @@ export class KosongConfigService extends Disposable implements IKosongConfigServ
   private enqueuePersistDefaultPointer(domain: string, value: string | undefined): Promise<void> {
     return this.enqueue(async () => {
       if (this.config.get<string>(domain) === value) return;
-      await this.replaceWithRetry(domain, value);
+      const persistDefaultModel =
+        this.config.get<boolean | undefined>(PERSIST_DEFAULT_MODEL_SECTION) ?? true;
+      const target =
+        domain === DEFAULT_MODEL_SECTION
+          ? persistDefaultModel
+            ? ConfigTarget.User
+            : ConfigTarget.Memory
+          : undefined;
+      await this.replaceWithRetry(domain, value, target);
       // An effective overlay may pin the section (e.g. `KIMI_MODEL_NAME`
       // pins `defaultModel` to the reserved env model): the write then lands
       // only in the user layer — the effective value does not move and no
@@ -199,13 +220,13 @@ export class KosongConfigService extends Disposable implements IKosongConfigServ
       // awaiting it from inside the persist chain would deadlock — its own
       // `waitUntil` would queue behind this very task.
       if (domain === DEFAULT_PROVIDER_SECTION) {
-        void this.providers
-          .setDefaultProvider(effective)
-          .catch((error) => this.logPersistFailure(error));
+        void this.providers.setDefaultProvider(effective).catch((error) => {
+          this.logPersistFailure(error);
+        });
       } else if (domain === DEFAULT_MODEL_SECTION) {
-        void this.models
-          .setDefaultModel(effective)
-          .catch((error) => this.logPersistFailure(error));
+        void this.models.setDefaultModel(effective).catch((error) => {
+          this.logPersistFailure(error);
+        });
       }
     });
   }
@@ -217,11 +238,19 @@ export class KosongConfigService extends Disposable implements IKosongConfigServ
    * every mutation's await behind it, so a multi-minute budget would stall
    * all callers instead of just logging the failure.
    */
-  private async replaceWithRetry(domain: string, value: unknown): Promise<void> {
+  private async replaceWithRetry(
+    domain: string,
+    value: unknown,
+    target?: ConfigTarget,
+  ): Promise<void> {
     const delays = retryBackoffDelays(PERSIST_MAX_ATTEMPTS);
     for (let attempt = 0; ; attempt += 1) {
       try {
-        await this.config.replace(domain, value);
+        if (target === undefined) {
+          await this.config.replace(domain, value);
+        } else {
+          await this.config.replace(domain, value, target);
+        }
         return;
       } catch (error) {
         const delay = delays[attempt];
@@ -235,7 +264,9 @@ export class KosongConfigService extends Disposable implements IKosongConfigServ
     // The chain itself always recovers so one failed task cannot poison the
     // persists queued behind it; the returned promise is what the registry's
     // `waitUntil` (and thereby the mutation's caller) observes.
-    this.persistChain = this.persistChain.then(task).catch((error) => this.logPersistFailure(error));
+    this.persistChain = this.persistChain.then(task).catch((error) => {
+      this.logPersistFailure(error);
+    });
     return this.persistChain;
   }
 

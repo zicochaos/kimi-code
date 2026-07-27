@@ -96,7 +96,6 @@ describe('server-v2 /api/v1/config', () => {
     expect(after.default_permission_mode).toBe('auto');
     expect(after.yolo).toBe(false);
   });
-
   it('POST secondary_model persists [secondary_model] and echoes it on GET', async () => {
     await boot();
     const cfg = await patchConfig({
@@ -128,5 +127,67 @@ describe('server-v2 /api/v1/config', () => {
     const afterModels = after.models as Record<string, unknown>;
     expect(afterModels['k2-test']).toBeDefined();
     expect(afterModels['__secondary__']).toBeUndefined();
+  });
+
+  it('GET and POST retain fork config booleans', async () => {
+    await boot('persist_default_model = false\nagents_md_expand_includes = false\n');
+
+    const initial = await getConfig();
+    expect(initial.persist_default_model).toBe(false);
+    expect(initial.agents_md_expand_includes).toBe(false);
+
+    const updated = await patchConfig({
+      persist_default_model: true,
+      agents_md_expand_includes: true,
+    });
+    expect(updated.persist_default_model).toBe(true);
+    expect(updated.agents_md_expand_includes).toBe(true);
+
+    const after = await getConfig();
+    expect(after.persist_default_model).toBe(true);
+    expect(after.agents_md_expand_includes).toBe(true);
+    const text = await readFile(join(home as string, 'config.toml'), 'utf-8');
+    expect(text).toContain('persist_default_model = true');
+    expect(text).toContain('agents_md_expand_includes = true');
+  });
+
+  it('keeps default_model and thinking in memory when persistence is disabled', async () => {
+    const initial = `
+persist_default_model = false
+default_model = "disk-model"
+
+[thinking]
+enabled = true
+effort = "high"
+
+[models.disk-model]
+model = "disk-model"
+max_context_size = 1000
+
+[models.session-model]
+model = "session-model"
+max_context_size = 1000
+`;
+    await boot(initial);
+
+    const cfg = await patchConfig({
+      default_model: 'session-model',
+      thinking: { effort: 'low' },
+    });
+
+    expect(cfg.persist_default_model).toBe(false);
+    expect(cfg.default_model).toBe('session-model');
+    expect(cfg.thinking).toEqual({ enabled: true, effort: 'low' });
+    expect(await readFile(join(home as string, 'config.toml'), 'utf-8')).toBe(initial);
+
+    const persisted = await patchConfig({ persist_default_model: true });
+    expect(persisted.persist_default_model).toBe(true);
+    expect(persisted.default_model).toBe('session-model');
+    expect(persisted.thinking).toEqual({ enabled: true, effort: 'low' });
+    const text = await readFile(join(home as string, 'config.toml'), 'utf-8');
+    expect(text).toContain('persist_default_model = true');
+    expect(text).toContain('default_model = "session-model"');
+    expect(text).toContain('enabled = true');
+    expect(text).toContain('effort = "low"');
   });
 });

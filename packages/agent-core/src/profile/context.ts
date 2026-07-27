@@ -1,4 +1,6 @@
-import { dirname, join } from 'pathe';
+import { posix, win32 } from 'node:path';
+
+import { dirname, isAbsolute, join } from 'pathe';
 
 import type { Kaos } from '@moonshot-ai/kaos';
 
@@ -13,6 +15,8 @@ import type { SystemPromptContext } from './types';
 // longer truncates content; it only surfaces a user-visible warning so the user
 // can trim oversized instruction files.
 const AGENTS_MD_RECOMMENDED_MAX_BYTES = 32 * 1024;
+const AGENTS_MD_INCLUDE_MAX_DEPTH = 5;
+const AGENTS_MD_INCLUDE_LINE = /^@\s*(\S+)\s*$/;
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
 
@@ -24,6 +28,12 @@ export interface PreparedSystemPromptContext
 
 export interface PrepareSystemPromptContextOptions {
   readonly additionalDirs?: readonly string[];
+  /**
+   * When true, expand `@path` include directives inside AGENTS.md files.
+   * Project-level targets stay confined to the project root after realpath;
+   * trusted user-level files may use absolute targets. Default / absent = false.
+   */
+  readonly expandIncludes?: boolean;
 }
 
 export async function prepareSystemPromptContext(
@@ -32,9 +42,10 @@ export async function prepareSystemPromptContext(
   options?: PrepareSystemPromptContextOptions,
 ): Promise<PreparedSystemPromptContext> {
   const additionalDirs = normalizeAdditionalDirs(options?.additionalDirs ?? []);
+  const expandIncludes = options?.expandIncludes === true;
   const [cwdListing, agentsMdResult, additionalDirsInfo] = await Promise.all([
     listDirectory(kaos, undefined, { collapseHiddenDirs: true }),
-    loadAgentsMdForRoots(kaos, brandHome, [kaos.getcwd()]),
+    loadAgentsMdForRoots(kaos, brandHome, [kaos.getcwd()], expandIncludes),
     loadAdditionalDirsInfo(kaos, additionalDirs),
   ]);
   return {
@@ -45,8 +56,17 @@ export async function prepareSystemPromptContext(
   };
 }
 
-export async function loadAgentsMd(kaos: Kaos, brandHome?: string): Promise<string> {
-  const result = await loadAgentsMdForRoots(kaos, brandHome, [kaos.getcwd()]);
+export async function loadAgentsMd(
+  kaos: Kaos,
+  brandHome?: string,
+  options?: { readonly expandIncludes?: boolean },
+): Promise<string> {
+  const result = await loadAgentsMdForRoots(
+    kaos,
+    brandHome,
+    [kaos.getcwd()],
+    options?.expandIncludes === true,
+  );
   return result.content;
 }
 
@@ -59,17 +79,21 @@ async function loadAgentsMdForRoots(
   kaos: Kaos,
   brandHome: string | undefined,
   workDirs: readonly string[],
+  expandIncludes = false,
 ): Promise<LoadedAgentsMd> {
   const discovered: AgentFile[] = [];
   const seen = new Set<string>();
 
-  const collect = async (path: string): Promise<boolean> => {
+  const collect = async (path: string, projectRoot?: string): Promise<boolean> => {
     const file = await readAgentFile(kaos, path);
     if (file === undefined) return false;
     const key = kaos.normpath(file.path);
     if (seen.has(key)) return false;
     seen.add(key);
-    discovered.push(file);
+    const content = expandIncludes
+      ? await expandAgentsMdIncludes(kaos, file.content, file.path, projectRoot)
+      : file.content;
+    discovered.push({ path: file.path, content });
     return true;
   };
 
@@ -96,9 +120,9 @@ async function loadAgentsMdForRoots(
     const dirs = dirsRootToLeaf(rootKaos, rootWorkDir, projectRoot);
 
     for (const dir of dirs) {
-      await collect(join(dir, '.kimi-code', 'AGENTS.md'));
+      await collect(join(dir, '.kimi-code', 'AGENTS.md'), projectRoot);
       for (const fileName of ['AGENTS.md', 'agents.md']) {
-        if (await collect(join(dir, fileName))) break;
+        if (await collect(join(dir, fileName), projectRoot)) break;
       }
     }
   }
@@ -165,6 +189,95 @@ async function readAgentFile(kaos: Kaos, path: string): Promise<AgentFile | unde
   const content = (await kaos.readText(path, { errors: 'ignore' })).trim();
   if (content.length === 0) return undefined;
   return { path, content };
+}
+
+/**
+ * Expand lines of the form `@path` (absolute or relative to the including
+ * file) by inlining the target file contents. Nested includes are supported up
+ * to {@link AGENTS_MD_INCLUDE_MAX_DEPTH}. Cycles and missing files become HTML
+ * comments so the rest of the instruction file still loads.
+ */
+export async function expandAgentsMdIncludes(
+  kaos: Kaos,
+  content: string,
+  sourcePath: string,
+  projectRoot?: string,
+  stack: Set<string> = new Set(),
+  depth = 0,
+): Promise<string> {
+  if (depth >= AGENTS_MD_INCLUDE_MAX_DEPTH) return content;
+
+  const baseDir = dirname(sourcePath);
+  const realProjectRoot =
+    projectRoot === undefined ? undefined : await kaos.realpath(projectRoot);
+  const lines = content.split('\n');
+  const out: string[] = [];
+
+  for (const line of lines) {
+    const match = AGENTS_MD_INCLUDE_LINE.exec(line);
+    if (match === null) {
+      out.push(line);
+      continue;
+    }
+
+    const raw = match[1] ?? '';
+    const target = isAbsolute(raw) ? raw : join(baseDir, raw);
+    let key: string;
+    try {
+      key = await kaos.realpath(target);
+    } catch {
+      out.push(`<!-- missing include: ${raw} -->`);
+      continue;
+    }
+    if (
+      realProjectRoot !== undefined &&
+      !isInsideOrEqual(key, realProjectRoot, kaos.pathClass())
+    ) {
+      out.push(`<!-- blocked include: ${raw} -->`);
+      continue;
+    }
+    if (stack.has(key)) {
+      out.push(`<!-- circular include: ${raw} -->`);
+      continue;
+    }
+    if (!(await isFile(kaos, key))) {
+      out.push(`<!-- missing include: ${raw} -->`);
+      continue;
+    }
+
+    const included = (await kaos.readText(key, { errors: 'ignore' })).trim();
+    if (included.length === 0) {
+      out.push(`<!-- empty include: ${raw} -->`);
+      continue;
+    }
+
+    stack.add(key);
+    const expanded = await expandAgentsMdIncludes(
+      kaos,
+      included,
+      key,
+      realProjectRoot,
+      stack,
+      depth + 1,
+    );
+    stack.delete(key);
+    out.push(`<!-- Include: ${key} -->`);
+    out.push(expanded);
+  }
+
+  return out.join('\n');
+}
+
+function isInsideOrEqual(
+  child: string,
+  parent: string,
+  pathClass: ReturnType<Kaos['pathClass']>,
+): boolean {
+  const pathApi = pathClass === 'win32' ? win32 : posix;
+  const caseFold = (path: string): string => (pathClass === 'win32' ? path.toLowerCase() : path);
+  const relative = pathApi.relative(caseFold(parent), caseFold(child));
+  const escapes = relative === '..' || relative.startsWith(`..${pathApi.sep}`);
+  return relative === '' || (!escapes && !pathApi.isAbsolute(relative));
 }
 
 async function pathExists(kaos: Kaos, path: string): Promise<boolean> {

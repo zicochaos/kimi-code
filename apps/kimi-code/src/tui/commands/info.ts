@@ -116,11 +116,14 @@ interface RuntimeStatusResult {
 interface ManagedUsageResult {
   readonly usage?: ManagedUsageReport;
   readonly error?: string;
+  readonly model: string;
+  readonly provider: string;
 }
 
 export async function showUsage(host: SlashCommandHost): Promise<void> {
   const sessionUsage = await loadSessionUsageReport(host);
   const managedUsage = await loadManagedUsageReport(host);
+  syncManagedUsageToState(host, managedUsage);
   const reportArgs = {
     sessionUsage: sessionUsage.usage,
     sessionUsageError: sessionUsage.error,
@@ -140,6 +143,7 @@ export async function showStatusReport(host: SlashCommandHost): Promise<void> {
     loadRuntimeStatusReport(host),
     loadManagedUsageReport(host),
   ]);
+  syncManagedUsageToState(host, managedUsage);
   const appState = host.state.appState;
   const reportArgs = {
     version: appState.version,
@@ -208,10 +212,34 @@ async function loadManagedUsageReport(host: SlashCommandHost): Promise<ManagedUs
   try {
     res = await host.harness.auth.getManagedUsage(providerKey);
   } catch (error) {
-    return { error: formatErrorMessage(error) };
+    return { error: formatErrorMessage(error), model: alias, provider: providerKey };
   }
   if (res.kind === 'error') {
-    return { error: res.message };
+    return { error: res.message, model: alias, provider: providerKey };
   }
-  return { usage: { summary: res.summary, limits: res.limits, extraUsage: res.extraUsage } };
+  return {
+    usage: { summary: res.summary, limits: res.limits, extraUsage: res.extraUsage },
+    model: alias,
+    provider: providerKey,
+  };
+}
+
+/**
+ * Mirror the latest managed-usage fetch into appState so the footer quota
+ * readout refreshes at the same time as the /usage or /status panel. Skips
+ * the write when the active model is no longer on the managed provider (e.g.
+ * the user switched models while the request was in flight).
+ */
+function syncManagedUsageToState(
+  host: SlashCommandHost,
+  result: ManagedUsageResult | undefined,
+): void {
+  if (result === undefined) return;
+  const model = host.state.appState.model;
+  const providerKey = host.state.appState.availableModels[model]?.provider;
+  if (model !== result.model || providerKey !== result.provider) return;
+  host.setAppState({
+    managedUsage: result.usage ?? null,
+    managedUsageError: result.error ?? null,
+  });
 }
