@@ -86,7 +86,8 @@ async function makeTempDir(prefix: string): Promise<string> {
  * (`config.getAll()`) even when the file never sets them, while v1's schema
  * leaves the same fields absent (only `providers` defaults, on both sides).
  * Two sources: registered `defaultValue`s (models/image/subagent/
- * defaultPlanMode/extraSkillDirs/mergeAllAvailableSkills — see the v2
+ * defaultPlanMode/extraSkillDirs/mergeAllAvailableSkills/disabledSkills/
+ * extraAgentDirs/persistDefaultModel/agentsMdExpandIncludes — see the v2
  * `configSection.ts` registrations) and the env-binding pass, which
  * materializes `{}` for every section that declares env bindings
  * (thinking/services/loopControl/background/mcp) even with no env set.
@@ -103,6 +104,11 @@ const V2_INJECTED_SECTION_DEFAULTS: Record<string, unknown> = {
   mergeAllAvailableSkills: true,
   extraSkillDirs: [],
   subagent: { timeoutMs: 7_200_000 },
+  disabledSkills: [],
+  extraAgentDirs: [],
+  persistDefaultModel: true,
+  agentsMdExpandIncludes: false,
+  secondaryModel: {},
 };
 
 function deepEqual(a: unknown, b: unknown): boolean {

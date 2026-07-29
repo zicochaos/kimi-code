@@ -1152,7 +1152,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
    */
   override async listSkills(input: SessionIdRpcInput): Promise<readonly SkillSummary[]> {
     const catalog = this.requireLiveSession(input.sessionId).accessor.get(ISessionSkillCatalog);
-    await catalog.ready;
+    await catalog.awaitPendingReloads();
     return catalog.catalog.listSkills().map(summarizeSkill);
   }
 
