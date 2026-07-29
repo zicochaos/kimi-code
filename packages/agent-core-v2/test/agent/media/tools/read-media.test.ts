@@ -28,6 +28,10 @@ import {
 } from '#/agent/media/image-compress';
 import { createVideoUploader, registerMediaTools } from '#/agent/media/registerMediaTools';
 import { AgentMediaToolsRegistrar } from '#/agent/media/mediaToolsRegistrar';
+import {
+  resetUnexpectedErrorHandler,
+  setUnexpectedErrorHandler,
+} from '#/_base/errors/unexpectedError';
 import { AgentStateService } from '#/agent/state/agentStateService';
 import { AgentToolRegistryService } from '#/agent/toolRegistry/toolRegistryService';
 import {
@@ -824,7 +828,9 @@ describe('AgentMediaToolsRegistrar', () => {
     capabilities: ModelCapability;
   }
 
-  function createRegistrarHarness() {
+  function createRegistrarHarness(options?: {
+    readonly unresolvableAliases?: readonly string[];
+  }) {
     const registry = new AgentToolRegistryService();
     const eventBus = new EventBusService();
     const state: ProfileState = {
@@ -836,9 +842,14 @@ describe('AgentMediaToolsRegistrar', () => {
       getModel: () => state.alias,
     } as unknown as IAgentProfileService;
     const modelCatalog = {
-      getRequester: (id: string) => ({
-        model: { id, name: id, providerName: 'test', protocol: 'openai' },
-      }),
+      getRequester: (id: string) => {
+        if (options?.unresolvableAliases?.includes(id) === true) {
+          throw new Error(`Model "${id}" is not configured in config.toml.`);
+        }
+        return {
+          model: { id, name: id, providerName: 'test', protocol: 'openai' },
+        };
+      },
     } as unknown as IModelCatalog;
     const workspaceCtx = {
       workDir: '/workspace',
@@ -904,6 +915,22 @@ describe('AgentMediaToolsRegistrar', () => {
 
     bindModel('vision-model', capabilities({ image_in: true, video_in: true }));
     expect(registry.resolve('ReadMediaFile')).toBe(first);
+  });
+
+  it('registers without an uploader when the bound model cannot be resolved', () => {
+    const { registry, bindModel } = createRegistrarHarness({
+      unresolvableAliases: ['gone-model'],
+    });
+    const unexpected: unknown[] = [];
+    setUnexpectedErrorHandler((err) => unexpected.push(err));
+    try {
+      bindModel('gone-model', capabilities({ image_in: true, video_in: true }));
+    } finally {
+      resetUnexpectedErrorHandler();
+    }
+
+    expect(unexpected).toEqual([]);
+    expect(registry.resolve('ReadMediaFile')).toBeInstanceOf(ReadMediaFileTool);
   });
 
   it('unregisters on dispose', () => {
