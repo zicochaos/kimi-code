@@ -19,6 +19,7 @@ import { createHooks } from '#/hooks';
 import type { ToolCall } from '#/kosong/contract/message';
 import type { TokenUsage } from '#/kosong/contract/usage';
 import { IModelCatalog, type Model } from '#/kosong/model/catalog';
+import type { ModelRequester } from '#/kosong/model/modelRequester';
 import { SECONDARY_DERIVED_MODEL_ID } from '#/app/kosongConfig/secondaryModelOverlay';
 import {
   SECONDARY_MODEL_FLAG_ENV,
@@ -213,6 +214,13 @@ function modelCatalogResolving(...aliases: readonly string[]): IModelCatalog {
       }
       return { id: alias } as Model;
     },
+    getRequester: (alias: string) =>
+      ({
+        model: { id: alias } as Model,
+        request: () => {
+          throw new Error('modelCatalogResolving fake does not serve requests');
+        },
+      }) as unknown as ModelRequester,
     notifyConfigChanged: () => {},
   } as unknown as IModelCatalog;
 }
@@ -987,7 +995,9 @@ describe('Agent tool execution contract', () => {
     });
 
     if (execution.isError === true) {
-      throw new Error(`expected runnable execution, got: ${execution.output}`);
+      const output =
+        typeof execution.output === 'string' ? execution.output : JSON.stringify(execution.output);
+      throw new Error(`expected runnable execution, got: ${output}`);
     }
     expect(execution.description).toBe('Launching explore agent: Continue work');
     expect(execution.display).toMatchObject({ agent_name: 'explore' });
@@ -1039,7 +1049,9 @@ describe('Agent tool execution contract', () => {
     const tool = agentTool(context);
     const execution = await tool.resolveExecution(args);
     if (execution.isError === true) {
-      throw new Error(`expected runnable execution, got: ${execution.output}`);
+      const output =
+        typeof execution.output === 'string' ? execution.output : JSON.stringify(execution.output);
+      throw new Error(`expected runnable execution, got: ${output}`);
     }
 
     expect(execution.matchesRule?.('explore')).toBe(true);
