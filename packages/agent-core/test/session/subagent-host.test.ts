@@ -1175,7 +1175,7 @@ describe('SessionSubagentHost', () => {
       const child = testAgent({ kaos });
       child.mockNextResponse({ type: 'text', text: summary });
       const session = fakeSession(parent.agent, child.agent, {}, {
-        config: { agentsMdExpandIncludes: expandIncludes },
+        config: { providers: {}, agentsMdExpandIncludes: expandIncludes },
       });
       const host = new SessionSubagentHost(session, 'main');
 
