@@ -271,6 +271,7 @@ function createAgentLifecycleStub(options: AgentLifecycleStubOptions = {}): Agen
             _serviceBrand: undefined,
             data: () => ({ profileName: profileByAgentId.get(agentId) }),
             update: () => {},
+            republishStatus: () => {},
             isToolActive: () => false,
           } as never;
         }
@@ -1612,6 +1613,7 @@ describe('Agent tool execution contract', () => {
       _serviceBrand: undefined,
       data: () => ({ profileName: 'explore', modelAlias: 'stale-model' }),
       update: vi.fn(),
+      republishStatus: vi.fn(),
       isToolActive: () => false,
     } as unknown as IAgentProfileService;
     const lifecycle = createAgentLifecycleStub({

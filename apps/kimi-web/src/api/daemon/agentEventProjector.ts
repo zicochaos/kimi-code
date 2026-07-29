@@ -282,6 +282,23 @@ function projectSubagentProgress(
   // placeholders like "Started a step".
   if (sideChannelAgents.has(subagentId) && rawType === 'turn.step.started') return [];
 
+  // v1's `subagent.spawned` no longer carries the bound model — it rides the
+  // child's status updates instead. Patch the task and re-emit taskCreated so
+  // the reducer upserts the model onto the existing row.
+  if (rawType === 'agent.status.updated') {
+    const model = stringField(payload, 'model');
+    if (!model) return [];
+    const previous = state.subagentMeta.get(subagentId);
+    if (previous?.model === model) return [];
+    const task = patchSubagent(state, sessionId, subagentId, {
+      status: previous?.status ?? 'running',
+      subagentPhase: previous?.subagentPhase ?? 'working',
+      startedAt: previous?.startedAt ?? new Date().toISOString(),
+      model,
+    });
+    return task ? [{ type: 'taskCreated', sessionId, task }] : [];
+  }
+
   // The subagent's own streamed text: forward each delta as a `text`-kind
   // progress chunk so the reducer concatenates it into `AppTask.text`, letting
   // the right-side detail panel show the subagent's output growing live (like

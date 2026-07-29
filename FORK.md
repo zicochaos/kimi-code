@@ -37,21 +37,21 @@ rg -n "disabled_skills|persist_default_model|agents_md_expand_includes|formatTer
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `subagent-model-selection` | `false` | Optional exact configured/materializable model aliases on `Agent` and `AgentSwarm`, composed with upstream `primary`/`secondary` when secondary-model is enabled. Env: `KIMI_CODE_EXPERIMENTAL_SUBAGENT_MODEL_SELECTION` |
+| `subagent-model-selection` | `false` | **v2 engine only.** Optional exact configured/materializable model aliases on `Agent` and `AgentSwarm`, composed with upstream `primary`/`secondary` when secondary-model is enabled. Env: `KIMI_CODE_EXPERIMENTAL_SUBAGENT_MODEL_SELECTION`. The v1-side implementation was retired: upstream `#2232` shipped secondary-model binding + custom agent files on v1 (TUI included), so the default v1 engine now offers upstream's `primary`/`secondary` choices only |
 
 ### Upstream foundation (already on main@origin)
 
 | Feature | Notes |
 | --- | --- |
-| `#2064` secondary model | Configurable `[secondary_model]`, `primary`/`secondary` tool choices, secondary overlay, startup warning. Keep intact; fork exact-alias selection sits on top. |
+| `#2064` secondary model | Configurable `[secondary_model]`, `primary`/`secondary` tool choices, secondary overlay, startup warning. Keep intact; fork exact-alias selection (v2-only) sits on top. |
+| `#2232` v1 secondary model + agent files | Custom agent files (user/project/extra/explicit dirs), `--agent`/`--agent-file` in TUI and `kimi -p`, `[secondary_model]` + `KIMI_SECONDARY_MODEL` binding for spawned subagents behind `KIMI_CODE_EXPERIMENTAL_SECONDARY_MODEL`, `/secondary_model` TUI command, `disallowedTools` deny semantics. Supersedes the fork's retired v1 exact-alias selection. |
 
 ### TUI / protocol
 
 | Feature | Purpose |
 | --- | --- |
 | Stable terminal title | `formatTerminalTitle(workDir)` renders `[host] - ~/path` instead of changing with the session title |
-| Subagent model on headers | `subagent.spawned.model` supplies the effective model to Agent cards and AgentSwarm rows |
-| v1 spawn event parity | The default v1 engine includes the effective model in `subagent.spawned` |
+| Subagent model on cards | The bound model reaches Agent cards and AgentSwarm panels via the child's `agent.status.updated` (upstream's channel). v1's `subagent.spawned` no longer carries `model`; the roster tracker, kimi-web projector, and TUI all learn it from status updates |
 | Persistent managed quota | The TUI footer shows rolling plan windows and refreshes them after model/session/provider changes; stale responses are ignored |
 
 **Managed quota note:** quota is shown only when the active model provider is `managed:kimi-code`. Custom providers never display these account limits. `/usage` and `/status` refresh the TUI footer values. There is no `/usages` command.
@@ -103,8 +103,8 @@ Then `kimi -c` can continue the previous healthy session for that workdir.
 
 ### Secondary model vs exact-alias selection
 
-- Upstream `secondary-model` remains the foundation for `primary`/`secondary` and `[secondary_model]`.
-- Fork `subagent-model-selection` adds exact aliases under a separate experimental flag (default off).
+- Upstream `secondary-model` (now including `#2232`'s v1 port) is the foundation for `primary`/`secondary` and `[secondary_model]` on both engines.
+- Fork `subagent-model-selection` adds exact aliases under a separate experimental flag (default off) — **v2 engine only**; the v1 implementation was dropped in favor of upstream's.
 - Permission matching uses the semantic profile name; display labels may include the model for clarity.
 - Resume model semantics differ by engine: v1 realigns the child to the parent model alias (tool-call `model` is ignored); v2 keeps the journal-bound model and does not rebind from parent tool args.
 - Known limitations left open: legacy model directory still reserves the tokens `primary` / `secondary` (M-3), and the subagent model directory does not live-reload after config changes without a new session or equivalent restart (M-4).

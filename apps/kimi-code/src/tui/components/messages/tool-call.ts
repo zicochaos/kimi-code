@@ -93,6 +93,8 @@ export interface ToolCallSubagentSnapshot {
   readonly toolName: string;
   readonly toolCallDescription: string;
   readonly agentName: string | undefined;
+  /** Display name of the model the subagent is bound to, when known (live only). */
+  readonly model?: string;
   readonly phase: SubagentPhase | undefined;
   readonly toolCount: number;
   readonly elapsedSeconds: number | undefined;
@@ -100,7 +102,6 @@ export interface ToolCallSubagentSnapshot {
   readonly isError: boolean;
   readonly errorText: string | undefined;
   readonly latestActivity: string | undefined;
-  readonly model: string | undefined;
 }
 
 /**
@@ -846,16 +847,20 @@ export class ToolCallComponent extends Container {
   // ── Subagent API (called by KimiTUI event routing) ───────────────
 
   setSubagentMeta(agentId: string, agentName?: string, model?: string): void {
+    // Never let a model-less event wipe an already-known model display (the
+    // status-derived one from `updateSubagentMetrics`): v1's `subagent.spawned`
+    // no longer carries a model, so most events arrive with `undefined`.
+    const nextModel = model ?? (this.subagentAgentId === agentId ? this.subagentModel : undefined);
     if (
       this.subagentAgentId === agentId &&
       this.subagentAgentName === agentName &&
-      this.subagentModel === model
+      this.subagentModel === nextModel
     ) {
       return;
     }
     this.subagentAgentId = agentId;
     this.subagentAgentName = agentName;
-    this.subagentModel = model;
+    this.subagentModel = nextModel;
     this.headerText.setText(this.buildHeader());
     this.rebuildContent();
     this.notifySnapshotChange();
@@ -908,6 +913,7 @@ export class ToolCallComponent extends Container {
       toolName: this.toolCall.name,
       toolCallDescription: str(this.toolCall.args['description']) || str(this.toolCall.description),
       agentName: this.subagentAgentName,
+      model: this.subagentModel,
       phase: derivedPhase,
       toolCount: finished,
       elapsedSeconds: this.getSubagentElapsedSeconds(),
@@ -915,7 +921,6 @@ export class ToolCallComponent extends Container {
       isError: derivedPhase === 'failed',
       errorText,
       latestActivity,
-      model: this.subagentModel,
     };
   }
 
@@ -1177,12 +1182,16 @@ export class ToolCallComponent extends Container {
   updateSubagentMetrics(payload: {
     contextTokens?: number | undefined;
     usage?: TokenUsage | undefined;
+    modelDisplay?: string | undefined;
   }): void {
     if (payload.contextTokens !== undefined && payload.contextTokens > 0) {
       this.subagentContextTokens = payload.contextTokens;
     }
     if (payload.usage !== undefined) {
       this.subagentUsage = payload.usage;
+    }
+    if (payload.modelDisplay !== undefined) {
+      this.subagentModel = payload.modelDisplay;
     }
     this.headerText.setText(this.buildHeader());
     this.invalidate();
@@ -1773,15 +1782,11 @@ export class ToolCallComponent extends Container {
     const descriptionPlain = description.length > 0 ? ` (${description})` : '';
     const descriptionText = descriptionPlain.length > 0 ? currentTheme.dim(descriptionPlain) : '';
     const statsText = this.formatSingleSubagentStatsText();
-    const modelChip =
-      this.subagentModel !== undefined && this.subagentModel.length > 0
-        ? currentTheme.dim(` · ${this.subagentModel}`)
-        : '';
     if (isDone) {
-      return `${marker}${currentTheme.boldFg('success', labelText)}${modelChip} ${currentTheme.fg('success', `Completed${descriptionPlain}${statsText}`)}`;
+      return `${marker}${currentTheme.boldFg('success', labelText)} ${currentTheme.fg('success', `Completed${descriptionPlain}${statsText}`)}`;
     }
     const stats = currentTheme.dim(statsText);
-    return `${marker}${label} ${status}${descriptionText}${modelChip}${stats}`;
+    return `${marker}${label} ${status}${descriptionText}${stats}`;
   }
 
   private formatSingleSubagentStatus(phase: SubagentPhase | undefined): string {
@@ -1803,9 +1808,9 @@ export class ToolCallComponent extends Container {
   }
 
   private formatSingleSubagentStatsText(): string {
-    const parts = [
-      `${String(this.subToolActivities.size)} tool${this.subToolActivities.size === 1 ? '' : 's'}`,
-    ];
+    const parts: string[] = [];
+    if (this.subagentModel !== undefined) parts.push(this.subagentModel);
+    parts.push(`${String(this.subToolActivities.size)} tool${this.subToolActivities.size === 1 ? '' : 's'}`);
     const elapsed = this.getSubagentElapsedSeconds();
     if (elapsed !== undefined) parts.push(formatElapsed(elapsed));
     const tokens =

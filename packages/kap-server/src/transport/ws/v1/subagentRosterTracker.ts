@@ -86,6 +86,15 @@ export class SubagentRosterTracker {
         entry.started_at ??= new Date().toISOString();
         return;
       }
+      case 'agent.status.updated': {
+        // v1's `subagent.spawned` no longer carries the bound model — it
+        // rides the child's status updates instead. Adopt the first one we
+        // see so reconnect snapshots keep the model metadata.
+        const entry = this.bySession.get(sessionId)?.get(event.agentId);
+        if (!entry || event.model === undefined) return;
+        entry.model ??= event.model;
+        return;
+      }
       case 'subagent.suspended': {
         const entry = this.bySession.get(sessionId)?.get(event.subagentId);
         if (!entry) return;

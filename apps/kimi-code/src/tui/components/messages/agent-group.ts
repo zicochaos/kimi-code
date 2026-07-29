@@ -186,11 +186,9 @@ export class AgentGroupComponent extends Container {
     const desc = snap.toolCallDescription || '(no description)';
     const tail = formatLineTail(snap);
     const namePart = currentTheme.fg('primary', agentType);
-    const modelPart =
-      snap.model !== undefined && snap.model.length > 0 ? dim(`· ${snap.model} `) : '';
     const descPart = dim(`· ${desc}`);
     const stats = formatStats(snap);
-    const line1 = `  ${branch1} ${namePart} ${modelPart}${descPart}${stats}${tail}`;
+    const line1 = `  ${branch1} ${namePart} ${descPart}${stats}${tail}`;
     this.bodyContainer.addChild(new Text(line1, 0, 0));
 
     // Second-level line: latest activity, or Error for failures.
@@ -303,7 +301,9 @@ function formatBreakdownParts(counts: PhaseCounts): string[] {
 }
 
 function formatStats(snap: ToolCallSubagentSnapshot): string {
-  const parts = [`${String(snap.toolCount)} tool${snap.toolCount === 1 ? '' : 's'}`];
+  const parts: string[] = [];
+  if (snap.model !== undefined) parts.push(snap.model);
+  parts.push(`${String(snap.toolCount)} tool${snap.toolCount === 1 ? '' : 's'}`);
   if (snap.elapsedSeconds !== undefined) parts.push(formatElapsed(snap.elapsedSeconds));
   if (snap.tokens > 0) parts.push(formatTokens(snap.tokens));
   return currentTheme.dim(` · ${parts.join(' · ')}`);

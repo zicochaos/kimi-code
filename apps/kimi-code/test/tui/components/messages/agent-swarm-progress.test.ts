@@ -167,27 +167,38 @@ describe('AgentSwarmProgressComponent', () => {
     expect(output).not.toContain('01');
   });
 
-  it('shows the shared model in the header when members share one', () => {
+  it('shows the bound model display name in the header', () => {
     const component = createComponent();
-    component.registerSubagent({ agentId: 'agent-1', model: 'example/model-a' });
-    component.registerSubagent({ agentId: 'agent-2', model: 'example/model-a' });
 
-    const output = renderText(component);
+    component.setMemberModel('agent-1', 'kimi-k2-thinking');
+    const lines = renderLines(component);
+    const headerLine = lines.find((line) => line.includes('Agent Swarm'));
 
-    expect(output).toContain('Agent Swarm');
-    expect(output).toContain('example/model-a');
+    expect(headerLine).toBeDefined();
+    expect(headerLine).toContain('Review changed files ─ kimi-k2-thinking');
   });
 
-  it('omits the model from the header when members disagree', () => {
+  it('shows the header model while every reported member agrees', () => {
     const component = createComponent();
-    component.registerSubagent({ agentId: 'agent-1', model: 'example/model-a' });
-    component.registerSubagent({ agentId: 'agent-2', model: 'example/model-b' });
+
+    component.setMemberModel('agent-1', 'kimi-k2-thinking');
+    component.setMemberModel('agent-2', 'kimi-k2-thinking');
 
     const output = renderText(component);
 
-    expect(output).toContain('Agent Swarm');
-    expect(output).not.toContain('example/model-a');
-    expect(output).not.toContain('example/model-b');
+    expect(output).toContain('kimi-k2-thinking');
+  });
+
+  it('omits the header model when members report different bindings', () => {
+    const component = createComponent();
+
+    component.setMemberModel('agent-1', 'kimi-k2-thinking');
+    component.setMemberModel('agent-2', 'other-model');
+
+    const output = renderText(component);
+
+    expect(output).not.toContain('kimi-k2-thinking');
+    expect(output).not.toContain('other-model');
   });
 
   it('repaints from the active palette when the theme changes', () => {

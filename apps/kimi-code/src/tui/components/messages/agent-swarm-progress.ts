@@ -113,7 +113,6 @@ interface AgentSwarmMember {
   ticks: number;
   itemText: string;
   latestModelText: string;
-  model?: string;
   completedText?: string;
   failureText?: string;
   cancelledLabelText?: string;
@@ -191,6 +190,7 @@ export class AgentSwarmProgressComponent implements Component {
   private description: string;
   private readonly requestRender: (() => void) | undefined;
   private readonly availableGridHeight: (() => number | undefined) | undefined;
+  private readonly memberModels = new Map<string, string>();
   private inputComplete = false;
   private failed = false;
   private aborted = false;
@@ -223,6 +223,25 @@ export class AgentSwarmProgressComponent implements Component {
   setActivitySpinnerText(provider: (() => string) | undefined): void {
     if (!this.toolCallActive) return;
     this.activitySpinnerText = provider;
+  }
+
+  /**
+   * Record a member's bound model (from its status update). The header shows
+   * the model only while every reported member agrees — mixed bindings
+   * (e.g. resumed agents that kept an older binding alongside freshly spawned
+   * ones) leave the header without a model rather than attributing one
+   * member's model to the whole swarm.
+   */
+  setMemberModel(agentId: string, modelDisplay: string): void {
+    if (modelDisplay.length === 0) return;
+    this.memberModels.set(agentId, modelDisplay);
+  }
+
+  private headerModelDisplay(): string {
+    const models = [...this.memberModels.values()];
+    const first = models[0];
+    if (first === undefined) return '';
+    return models.every((model) => model === first) ? first : '';
   }
 
   markToolCallEnded(): void {
@@ -291,12 +310,10 @@ export class AgentSwarmProgressComponent implements Component {
     readonly agentId: string;
     readonly swarmIndex?: number;
     readonly description?: string | undefined;
-    readonly model?: string | undefined;
   }): void {
     const member = this.findMemberForSubagent(input.agentId, input.swarmIndex);
     if (member === undefined) return;
     member.agentId = input.agentId;
-    if (input.model !== undefined) member.model = input.model;
     if (member.phase === 'pending') member.phase = 'queued';
     this.startAnimationIfNeeded();
   }
@@ -484,37 +501,17 @@ export class AgentSwarmProgressComponent implements Component {
       this.description.length > 0
         ? chalk.hex(this.colors.primary)(' ─ ') + chalk.hex(this.colors.text)(this.description)
         : '';
-    const sharedModel = this.sharedMemberModel();
-    const modelLabel =
-      sharedModel !== undefined
-        ? chalk.hex(this.colors.primary)(' ─ ') + chalk.hex(this.colors.textDim)(sharedModel)
+    const modelDisplay = this.headerModelDisplay();
+    const model =
+      modelDisplay.length > 0
+        ? chalk.hex(this.colors.primary)(' ─ ') + chalk.hex(this.colors.textDim)(modelDisplay)
         : '';
     const prefixText = '─ ';
     const labelWidth = Math.max(1, width - visibleWidth(prefixText) - 1);
-    const label = truncateToWidth(title + description + modelLabel, labelWidth);
+    const label = truncateToWidth(title + description + model, labelWidth);
     const suffixWidth = Math.max(0, width - visibleWidth(prefixText) - visibleWidth(label));
     const suffix = suffixWidth === 0 ? '' : ` ${'─'.repeat(Math.max(0, suffixWidth - 1))}`;
     return chalk.hex(this.colors.primary)(prefixText) + label + chalk.hex(this.colors.primary)(suffix);
-  }
-
-  /**
-   * Returns the model alias shared by every member that has one, or undefined
-   * when members have no model or disagree. Used to surface the swarm's model
-   * in the header without per-member clutter.
-   */
-  private sharedMemberModel(): string | undefined {
-    let shared: string | undefined;
-    let seen = false;
-    for (const member of this.members) {
-      if (member.model === undefined) continue;
-      if (!seen) {
-        shared = member.model;
-        seen = true;
-      } else if (member.model !== shared) {
-        return undefined;
-      }
-    }
-    return seen ? shared : undefined;
   }
 
   private renderStatusLine(width: number): string {

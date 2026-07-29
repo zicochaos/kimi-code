@@ -1033,57 +1033,32 @@ describe('ToolCallComponent', () => {
     expect(out).not.toContain('summary fallback');
   });
 
-  it('shows the subagent model in the header when spawned with a model', () => {
+  it('shows the bound model in the subagent header and group snapshot once reported', () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     const component = new ToolCallComponent(
       {
         id: 'call_agent_model',
         name: 'Agent',
-        args: { description: 'explore project xxx' },
+        args: { description: 'explore project' },
       },
       undefined,
     );
-
     component.onSubagentSpawned({
-      agentId: 'sub_explore_model',
-      agentName: 'explore',
-      runInBackground: false,
-      model: 'example/test-model',
-    });
-
-    component.onSubagentStarted({
-      agentId: 'sub_explore_model',
-      agentName: 'explore',
-      runInBackground: false,
-      model: 'example/test-model',
-    });
-
-    const out = strip(component.render(120).join('\n'));
-    expect(out).toContain('Explore Agent Running (explore project xxx) · example/test-model · 0 tools · 0s');
-  });
-
-  it('omits the model chip when the subagent has no model', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(10_000);
-    const component = new ToolCallComponent(
-      {
-        id: 'call_agent_no_model',
-        name: 'Agent',
-        args: { description: 'explore project xxx' },
-      },
-      undefined,
-    );
-
-    component.onSubagentSpawned({
-      agentId: 'sub_explore_no_model',
+      agentId: 'sub_model_1',
       agentName: 'explore',
       runInBackground: false,
     });
 
-    const out = strip(component.render(120).join('\n'));
-    expect(out).not.toContain('local/');
-    expect(out).toContain('Explore Agent Queued (explore project xxx) · 0 tools · 0s');
+    let out = strip(component.render(120).join('\n'));
+    expect(out).toContain('Explore Agent Queued (explore project) · 0 tools');
+    expect(out).not.toContain('Kimi K2.5');
+
+    component.updateSubagentMetrics({ modelDisplay: 'Kimi K2.5' });
+
+    out = strip(component.render(120).join('\n'));
+    expect(out).toContain('Explore Agent Queued (explore project) · Kimi K2.5 · 0 tools');
+    expect(component.getSubagentSnapshot().model).toBe('Kimi K2.5');
   });
 
   it('shows Backgrounded after a foreground subagent is detached, even after setResult', () => {

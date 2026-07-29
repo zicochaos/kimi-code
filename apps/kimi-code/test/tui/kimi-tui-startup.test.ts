@@ -96,6 +96,7 @@ function makeStartupInput(
       editorCommand: null,
       notifications: { enabled: true, condition: 'unfocused' },
       upgrade: { autoInstall: true },
+      statusLine: { items: null, command: null },
       ...tuiConfig,
     },
     version: '0.0.0-test',
@@ -235,8 +236,8 @@ describe('KimiTUI managed usage runtime', () => {
   it('refreshes quota when the active alias resolves from a custom provider to managed', async () => {
     const usage = {
       kind: 'ok' as const,
-      summary: { label: '1w limit', used: 12, limit: 100 },
-      limits: [{ label: '5h limit', used: 40, limit: 100 }],
+      summary: { window: { duration: 1, unit: 'week' }, used: 12, limit: 100 },
+      limits: [{ window: { duration: 5, unit: 'hour' }, used: 40, limit: 100 }],
       extraUsage: null,
     };
     const getManagedUsage = vi.fn(async () => usage);
@@ -283,7 +284,7 @@ describe('KimiTUI managed usage runtime', () => {
   it('clears quota and drops a delayed response when the active alias resolves to custom', async () => {
     const pending = deferred<{
       readonly kind: 'ok';
-      readonly summary: { readonly label: string; readonly used: number; readonly limit: number };
+      readonly summary: { readonly name: string; readonly used: number; readonly limit: number };
       readonly limits: readonly [];
       readonly extraUsage: null;
     }>();
@@ -307,7 +308,7 @@ describe('KimiTUI managed usage runtime', () => {
         },
       },
       managedUsage: {
-        summary: { label: 'old limit', used: 90, limit: 100 },
+        summary: { name: 'old', used: 90, limit: 100 },
         limits: [],
         extraUsage: null,
       },
@@ -325,7 +326,7 @@ describe('KimiTUI managed usage runtime', () => {
     });
     pending.resolve({
       kind: 'ok',
-      summary: { label: 'stale limit', used: 10, limit: 100 },
+      summary: { name: 'stale', used: 10, limit: 100 },
       limits: [],
       extraUsage: null,
     });
@@ -393,6 +394,24 @@ describe('KimiTUI startup', () => {
       contextUsage: 0.125,
       sessionTitle: 'Session title',
     });
+  });
+
+  it('binds the resolved agent profile and agent files to the startup session', async () => {
+    const session = makeSession();
+    const harness = makeHarness(session);
+    const driver = makeDriver(harness, {
+      ...makeStartupInput({ agent: 'reviewer', agentFiles: ['reviewer.md'] }),
+      agentProfile: 'reviewer',
+    });
+
+    await expect(driver.init()).resolves.toBe(false);
+
+    expect(harness.createSession).toHaveBeenCalledWith({
+      workDir: '/tmp/proj-a',
+      agentProfile: 'reviewer',
+      agentFiles: ['reviewer.md'],
+    });
+    expect(driver.state.startupState).toBe('ready');
   });
 
   it('resumes the latest session for --continue and marks history for replay', async () => {
@@ -1316,6 +1335,43 @@ describe('KimiTUI startup', () => {
       model: 'k2',
       permissionMode: 'yolo',
       planMode: true,
+    });
+  });
+
+  it('carries the agent binding into the post-login startup session', async () => {
+    const session = makeSession();
+    const createSession = vi
+      .fn()
+      .mockRejectedValueOnce(loginRequiredError())
+      .mockResolvedValueOnce(session);
+    const harness = makeHarness(session, {
+      getConfig: vi.fn(async () => ({
+        defaultModel: 'k2',
+        thinking: { enabled: false },
+        models: {
+          k2: { model: 'moonshot-v1', maxContextSize: 100 },
+        },
+      })),
+      createSession,
+    });
+    const driver = makeDriver(harness, {
+      ...makeStartupInput({ agent: 'reviewer', agentFiles: ['reviewer.md'] }),
+      agentProfile: 'reviewer',
+    });
+
+    await expect(driver.init()).resolves.toBe(false);
+
+    vi.mocked(promptPlatformSelection).mockResolvedValue('kimi-code');
+    await handleLoginCommand(driver as any);
+
+    expect(createSession).toHaveBeenNthCalledWith(2, {
+      workDir: '/tmp/proj-a',
+      model: 'k2',
+      thinking: 'off',
+      permission: undefined,
+      planMode: undefined,
+      agentProfile: 'reviewer',
+      agentFiles: ['reviewer.md'],
     });
   });
 

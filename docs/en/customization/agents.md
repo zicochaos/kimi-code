@@ -22,25 +22,6 @@ Each dispatch is presented in the terminal as an approval request (unless it mat
 
 Sub-agents support running in the background: results are automatically returned to the main Agent upon completion, with no manual polling needed. You can also call back an existing sub-agent instance to continue the same task.
 
-Choosing an exact configured model alias for delegated work is experimental and disabled by default. Enable it persistently in `config.toml`:
-
-```toml
-[experimental]
-subagent-model-selection = true
-```
-
-To enable it only for the current process, set the dedicated environment variable instead:
-
-```sh
-export KIMI_CODE_EXPERIMENTAL_SUBAGENT_MODEL_SELECTION=1
-```
-
-When enabled, `Agent` and `AgentSwarm` accept exact configured model aliases via the optional `model` parameter, in addition to the upstream `primary` / `secondary` choices from the secondary-model experiment. The calling Agent sees a directory built from safe, materializable model aliases in your configuration. Omit `model` to keep the normal secondary/primary default. On resume, the optional `model` argument is ignored: the default v1 engine realigns the child to the parent model alias, while the v2 engine keeps the model already bound in that subagent's journal.
-
-The directory exposes up to 64 ASCII-safe model aliases plus a restricted set of non-sensitive metadata: known capabilities, context/output limits, and only the fixed thinking-effort values `off`, `on`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Other aliases and metadata values are omitted rather than rewritten, so every displayed alias remains an exact configuration key. `primary` and `secondary` are reserved and do not appear as exact aliases in the directory. The directory never includes display names, API keys, base URLs, custom headers, provider identifiers, provider wire model names, or `passthrough` configuration. Permission rules still match the semantic agent profile name; the approval label may show the selected model for clarity.
-
-After changing `config.toml`, run `/reload` (or start a new session). Because providers and models can differ in price, context-window size, and capabilities, check the relevant provider's pricing and limits before delegating large batches.
-
 ## Context Isolation and Resource Cost
 
 Each sub-agent has a fully independent context window. It can only see the task description explicitly passed by the main Agent and cannot see the main Agent's conversation history. The sub-agent's own intermediate reasoning and tool call records do not flow back; only the final result appears in the main Agent's context.
@@ -128,7 +109,7 @@ The body is the agent's system prompt, and it is rendered as a template each tim
 
 Unknown fields are ignored, so newer files stay readable by older versions. Fields from other agent tools (such as Claude Code's `model` or OpenCode's `mode`) are ignored the same way, the comma-separated `tools` form keeps Claude Code-style agent files loadable, and a missing `name` falls back to the file name so OpenCode-style files load too — a minimal file with `description` and a body works across tools.
 
-`model_preference` applies only to newly spawned subagents when the secondary-model experiment is enabled. Under `kimi web`, set `KIMI_CODE_EXPERIMENTAL_SECONDARY_MODEL=1`; under experimental `kimi -p`, the required `KIMI_CODE_EXPERIMENTAL_FLAG=1` also enables it. The TUI currently ignores this field. It never names a concrete model alias. Resume does not re-apply `model_preference`: v1 realigns the child to the parent model alias, and v2 keeps the journal-bound model. The selected preference is shown to the main agent alongside the profile description so it can still pass an explicit `model` when a task needs a different choice.
+`model_preference` applies only to newly spawned subagents when the secondary-model experiment is enabled — set `KIMI_CODE_EXPERIMENTAL_SECONDARY_MODEL=1`, or the master `KIMI_CODE_EXPERIMENTAL_FLAG=1`. It takes effect in every launch mode, including the interactive TUI. The field never names a concrete model alias, and resumed subagents keep their existing model. The selected preference is shown to the main agent alongside the profile description so it can still pass an explicit `model` when a task needs a different choice.
 
 A file with invalid content discovered in a directory is skipped with a warning and does not affect other files. A file passed explicitly via `--agent-file` must be valid — otherwise the CLI reports the error and exits.
 
@@ -140,24 +121,27 @@ Custom agents delegated as sub-agents run without the built-in sub-agent framing
 
 ### Selecting the Main Agent
 
-Two CLI flags select which agent drives the session. **Both are currently available only under `kimi -p` with `KIMI_CODE_EXPERIMENTAL_FLAG=1`**; the interactive TUI rejects them with a clear error for now:
+Two CLI flags select which agent drives a new session, in both print mode (`kimi -p`) and the interactive TUI:
 
 - **`--agent <name>`**: Start the session with the named agent as the main Agent. The name can refer to a built-in agent or to any discovered file; an unknown name fails with an error listing the available agents.
 - **`--agent-file <path>`**: Load one agent file at the highest priority for this launch and start with it. The flag accepts exactly one file: it cannot be repeated, and it cannot be combined with `--agent`.
 
-For example, in print mode:
+Both flags only apply when starting a new session — neither can be combined with `--session`/`--continue`. The agent is bound at session creation, and resuming restores the bound agent automatically, so no flag is needed (or allowed) on resume.
+
+For example:
 
 ```sh
-KIMI_CODE_EXPERIMENTAL_FLAG=1 kimi -p --agent reviewer "Review the changes on this branch"
+kimi --agent reviewer
+kimi -p --agent reviewer "Review the changes on this branch"
 ```
 
-The bound agent is the session's identity: it is fixed at the session's first bind and cannot be switched later. Re-selecting the already-bound agent (for example resuming with the same `--agent`) is a no-op; selecting a different one fails with an "already bound" error.
+The bound agent is the session's identity: it is fixed at the session's first bind and cannot be switched later. In the TUI the flags bind only the startup session; a session created later in the same process (for example via `/new`) starts with the default agent.
 
 For main-agent customization, reference `${base_prompt}` in the body so the environment, workspace-instruction, and Skill injections from the default prompt stay in effect; a body without `${base_prompt}` owns the entire prompt, which fits self-contained sub-agents.
 
 ### Overriding the main agent's system prompt with SYSTEM.md
 
-To override the main agent's system prompt permanently — without passing `--agent` or `--agent-file` on every launch — write a `$KIMI_CODE_HOME/SYSTEM.md` file (default: `~/.kimi-code/SYSTEM.md`; it moves with `KIMI_CODE_HOME`). While the file exists and is non-empty, it replaces the built-in default main agent's system prompt in full — and only the prompt: the description and tool set are inherited from the built-in defaults. SYSTEM.md currently takes effect only under `kimi web` and under `kimi -p` with `KIMI_CODE_EXPERIMENTAL_FLAG=1`; the interactive TUI ignores the file.
+To override the main agent's system prompt permanently — without passing `--agent` or `--agent-file` on every launch — write a `$KIMI_CODE_HOME/SYSTEM.md` file (default: `~/.kimi-code/SYSTEM.md`; it moves with `KIMI_CODE_HOME`). While the file exists and is non-empty, it replaces the built-in default main agent's system prompt in full — and only the prompt: the description, tool set, and sub-agent delegation allowlist are inherited from the built-in defaults. SYSTEM.md takes effect in every launch mode, including interactive TUI sessions.
 
 SYSTEM.md is a plain Markdown body — no frontmatter is required or read. A missing or empty file has no effect, and a read failure falls back to the built-in prompt with a warning. Explicit intent still outranks it: a project-scoped same-name agent file declaring `override: true` and any file passed via `--agent-file` take precedence, and selecting another agent with `--agent` bypasses it entirely. Within the user scope itself, SYSTEM.md wins over a same-name file discovered in the `agents/` directories.
 

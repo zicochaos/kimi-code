@@ -8,10 +8,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Agent, AgentOptions } from '../../src/agent';
 import { AGENT_WIRE_PROTOCOL_VERSION } from '../../src/agent/records';
-import type { ResolvedAgentProfile } from '../../src/profile';
+import type { KimiConfig } from '../../src/config';
+import { ErrorCodes, KimiError } from '../../src/errors';
+import { FlagResolver } from '../../src/flags';
+import { SessionAgentProfileCatalog, type ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
 import { collectGitContext } from '../../src/session/git-context';
+import { ProviderManager } from '../../src/session/provider-manager';
 import {
   DEFAULT_SUBAGENT_TIMEOUT_MS,
   SessionSubagentHost,
@@ -328,7 +332,6 @@ describe('SessionSubagentHost', () => {
           subagentName: 'explore',
           parentAgentId: 'main',
           parentToolCallId: 'call_agent',
-          model: 'mock-model',
         }),
       }),
     );
@@ -492,6 +495,7 @@ describe('SessionSubagentHost', () => {
         agents: new Map([['main', parent.agent]]),
         ensureAgentResumed: vi.fn(async () => parent.agent),
         createAgent,
+        agentCatalog: testAgentCatalog(),
       } as never,
       'main',
     );
@@ -518,6 +522,7 @@ describe('SessionSubagentHost', () => {
         agents: new Map([['main', parent.agent]]),
         ensureAgentResumed: vi.fn(async () => parent.agent),
         createAgent,
+        agentCatalog: testAgentCatalog(),
       } as never,
       'main',
     );
@@ -1129,6 +1134,69 @@ describe('SessionSubagentHost', () => {
     expect(userTextMessages(histories[1] ?? [])).toEqual(['Implement the retry-safe change']);
   });
 
+  it('expands AGENTS.md includes for spawned subagents when the option is on', async () => {
+    const workDir = '/repo';
+    const kaos = createFakeKaos({
+      getcwd: () => workDir,
+      mkdir: vi.fn(async () => {}),
+      writeText: vi.fn().mockResolvedValue(0),
+      stat: vi.fn(async (path: string) => {
+        if ([workDir, `${workDir}/.git`].includes(path)) return stat('dir');
+        if ([`${workDir}/AGENTS.md`, `${workDir}/extra.md`].includes(path)) return stat('file');
+        throw new Error(`ENOENT ${path}`);
+      }),
+      iterdir: async function* (path: string) {
+        if (path === workDir) {
+          yield `${workDir}/AGENTS.md`;
+          yield `${workDir}/extra.md`;
+          return;
+        }
+        throw new Error(`ENOENT ${path}`);
+      },
+      readText: vi.fn(async (path: string) => {
+        if (path === `${workDir}/AGENTS.md`) return 'base instructions\n@extra.md';
+        if (path === `${workDir}/extra.md`) return 'included instructions';
+        throw new Error(`ENOENT ${path}`);
+      }),
+      realpath: vi.fn(async (path: string) => path),
+    });
+    const summary =
+      'Completed the subagent task and returned a detailed enough summary for the parent agent to continue confidently without repeating the child agent work. '.repeat(
+        2,
+      );
+
+    const spawnWith = async (expandIncludes: boolean): Promise<string> => {
+      const parent = testAgent({ kaos });
+      parent.configure();
+      // The harness pins cwd to process.cwd(); point the parent back at the
+      // fake workspace so the spawned child inherits it (configureChild
+      // copies parent.config.cwd onto the child kaos).
+      parent.agent.config.update({ cwd: workDir });
+      const child = testAgent({ kaos });
+      child.mockNextResponse({ type: 'text', text: summary });
+      const session = fakeSession(parent.agent, child.agent, {}, {
+        config: { agentsMdExpandIncludes: expandIncludes },
+      });
+      const host = new SessionSubagentHost(session, 'main');
+
+      const handle = await host.spawn({
+        profileName: 'coder',
+        parentToolCallId: 'call_agent',
+        prompt: 'Implement the fix',
+        description: 'Fix bug',
+        runInBackground: false,
+        signal,
+      });
+      await handle.completion;
+      return child.agent.config.systemPrompt;
+    };
+
+    expect(await spawnWith(true)).toContain('included instructions');
+    const withoutExpansion = await spawnWith(false);
+    expect(withoutExpansion).not.toContain('included instructions');
+    expect(withoutExpansion).toContain('@extra.md');
+  });
+
   it('realigns a resumed subagent to the parent agent current model', async () => {
     const parent = testAgent();
     parent.configure();
@@ -1174,11 +1242,237 @@ describe('SessionSubagentHost', () => {
       expect.objectContaining({
         type: '[rpc]',
         event: 'subagent.spawned',
-        args: expect.objectContaining({
-          model: parent.agent.config.modelAlias,
-        }),
       }),
     );
+  });
+
+  describe('secondary model binding', () => {
+    const secondaryFlags = () =>
+      new FlagResolver({ KIMI_CODE_EXPERIMENTAL_SECONDARY_MODEL: '1' });
+    const LONG_SUMMARY =
+      'Completed the delegated task end to end and reported a technically complete summary so the parent agent can continue without repeating prior work. ' +
+      'The report covers the investigation, the changes made, and the verification results in enough detail for the caller to act on directly.';
+    // Harness model registry entries resolvable through the child's
+    // ProviderManager: the secondary alias and the synthesized derived entry
+    // (in production `applySecondaryModelConfig` injects the latter into the
+    // session runtime config).
+    const withSecondaryModels = (config?: KimiConfig): KimiConfig => ({
+      providers: { 'test-provider': { type: 'kimi', apiKey: 'test-key' } },
+      ...config,
+      models: {
+        'cheap-model': {
+          provider: 'test-provider',
+          model: 'cheap-model',
+          maxContextSize: 1_000_000,
+        },
+        '__secondary__': {
+          provider: 'test-provider',
+          model: 'cheap-model',
+          maxContextSize: 65536,
+        },
+      },
+    });
+
+    async function spawnChild(options: {
+      config?: KimiConfig;
+      experimentalFlags?: FlagResolver;
+      providerManager?: Session['options']['providerManager'];
+      modelChoice?: 'primary' | 'secondary';
+      profilePreference?: 'primary' | 'secondary';
+    }) {
+      const parent = testAgent();
+      parent.configure();
+      const child = testAgent({ initialConfig: withSecondaryModels() });
+      child.configure({ tools: ['Read'] });
+      child.mockNextResponse({ type: 'text', text: LONG_SUMMARY });
+
+      const session = fakeSession(parent.agent, child.agent, {}, {
+        config: options.config,
+        experimentalFlags: options.experimentalFlags,
+        providerManager: options.providerManager,
+      });
+      const host = new SessionSubagentHost(session, 'main');
+      if (options.profilePreference !== undefined) {
+        vi.spyOn(
+          host as unknown as {
+            resolveProfile: (parent: Agent, name: string) => ResolvedAgentProfile;
+          },
+          'resolveProfile',
+        ).mockReturnValue(
+          profile({
+            name: 'coder',
+            tools: ['Read'],
+            systemPrompt: 'coder prompt',
+            modelPreference: options.profilePreference,
+          }),
+        );
+      }
+      const handle = await host.spawn({
+        profileName: 'coder',
+        modelChoice: options.modelChoice,
+        parentToolCallId: 'call_agent',
+        prompt: 'Do work',
+        description: 'Do work',
+        runInBackground: false,
+        signal,
+      });
+      await handle.completion;
+      return { parent, child, handle };
+    }
+
+    it('binds the secondary model when configured', async () => {
+      const { parent, child } = await spawnChild({
+        experimentalFlags: secondaryFlags(),
+        config: {
+          providers: {},
+          secondaryModel: { model: 'cheap-model' },
+        },
+      });
+      expect(child.agent.config.modelAlias).toBe('cheap-model');
+      expect(child.agent.config.modelAlias).not.toBe(parent.agent.config.modelAlias);
+    });
+
+    it('binds the derived entry when the recipe carries patch fields', async () => {
+      const { child } = await spawnChild({
+        experimentalFlags: secondaryFlags(),
+        config: {
+          providers: {},
+          secondaryModel: { model: 'cheap-model', defaultEffort: 'low' },
+        },
+      });
+      // default_effort is part of the subagent-only patch, so the spawn binds
+      // the synthesized derived entry rather than the pointed alias.
+      expect(child.agent.config.modelAlias).toBe('__secondary__');
+    });
+
+    it('inherits the parent model when the experiment is off', async () => {
+      const { parent, child } = await spawnChild({
+        config: { providers: {}, secondaryModel: { model: 'cheap-model' } },
+      });
+      expect(child.agent.config.modelAlias).toBe(parent.agent.config.modelAlias);
+    });
+
+    it('inherits the parent model for an explicit model: primary choice', async () => {
+      const { parent, child } = await spawnChild({
+        experimentalFlags: secondaryFlags(),
+        config: { providers: {}, secondaryModel: { model: 'cheap-model' } },
+        modelChoice: 'primary',
+      });
+      expect(child.agent.config.modelAlias).toBe(parent.agent.config.modelAlias);
+    });
+
+    it('honors the profile model_preference over the configured secondary model', async () => {
+      const { parent, child } = await spawnChild({
+        experimentalFlags: secondaryFlags(),
+        config: { providers: {}, secondaryModel: { model: 'cheap-model' } },
+        profilePreference: 'primary',
+      });
+      expect(child.agent.config.modelAlias).toBe(parent.agent.config.modelAlias);
+    });
+
+    it('fails the spawn with a wrapped error when the secondary model does not resolve', async () => {
+      const parent = testAgent();
+      parent.configure();
+      const child = testAgent();
+      child.configure({ tools: ['Read'] });
+      const config: KimiConfig = {
+        providers: {},
+        secondaryModel: { model: 'missing-model' },
+      };
+      const session = fakeSession(parent.agent, child.agent, {}, {
+        experimentalFlags: secondaryFlags(),
+        config,
+        providerManager: new ProviderManager({ config }),
+      });
+      const host = new SessionSubagentHost(session, 'main');
+
+      await expect(
+        host.spawn({
+          profileName: 'coder',
+          parentToolCallId: 'call_agent',
+          prompt: 'Do work',
+          description: 'Do work',
+          runInBackground: false,
+          signal,
+        }).then((handle) => handle.completion),
+      ).rejects.toThrow(/\[secondary_model\]\.model/);
+    });
+
+    it('preserves a provider configuration error when the secondary alias exists', async () => {
+      const parent = testAgent();
+      parent.configure();
+      const child = testAgent();
+      child.configure({ tools: ['Read'] });
+      const config: KimiConfig = {
+        providers: {},
+        models: {
+          'cheap-model': {
+            provider: 'missing-provider',
+            model: 'cheap-model',
+            maxContextSize: 1_000_000,
+          },
+        },
+        secondaryModel: { model: 'cheap-model' },
+      };
+      const session = fakeSession(parent.agent, child.agent, {}, {
+        experimentalFlags: secondaryFlags(),
+        config,
+        providerManager: new ProviderManager({ config }),
+      });
+      const host = new SessionSubagentHost(session, 'main');
+
+      await expect(
+        host.spawn({
+          profileName: 'coder',
+          parentToolCallId: 'call_agent',
+          prompt: 'Do work',
+          description: 'Do work',
+          runInBackground: false,
+          signal,
+        }).then((handle) => handle.completion),
+      ).rejects.toMatchObject({
+        message: 'Provider "missing-provider" for model "cheap-model" is not configured.',
+      });
+    });
+
+    it('keeps the spawned model on resume when the experiment is on', async () => {
+      const parent = testAgent();
+      parent.configure();
+      parent.agent.permission.setMode('yolo');
+
+      const child = testAgent({ initialConfig: withSecondaryModels() });
+      child.configure({ tools: ['Read'] });
+      child.agent.config.update({ modelAlias: 'cheap-model' });
+      child.agent.useProfile(
+        profile({ name: 'coder', tools: ['Read'], systemPrompt: 'coder prompt' }),
+      );
+      child.agent.context.appendUserMessage([{ type: 'text', text: 'Earlier context' }]);
+      child.mockNextResponse({ type: 'text', text: LONG_SUMMARY });
+
+      const session = fakeSession(parent.agent, child.agent, {
+        'agent-0': {
+          homedir: '/tmp/kimi-session/agents/agent-0',
+          type: 'sub',
+          parentAgentId: 'main',
+        },
+      }, {
+        experimentalFlags: secondaryFlags(),
+        config: { providers: {}, secondaryModel: { model: 'cheap-model' } },
+      });
+      const host = new SessionSubagentHost(session, 'main');
+
+      const handle = await host.resume('agent-0', {
+        parentToolCallId: 'call_agent',
+        prompt: 'Continue from context',
+        description: 'Continue work',
+        runInBackground: false,
+        signal,
+      });
+      await handle.completion;
+      // With the experiment on, resume no longer realigns the child to the
+      // parent's model: the subagent keeps the model it was bound to at spawn.
+      expect(child.agent.config.modelAlias).toBe('cheap-model');
+    });
   });
 });
 
@@ -1586,10 +1880,25 @@ describe('Session.createAgent', () => {
   });
 });
 
+function testAgentCatalog(): SessionAgentProfileCatalog {
+  // A real catalog seeded with the builtin profiles; discovery roots point
+  // at nonexistent dirs so no file profiles leak into the merge.
+  return new SessionAgentProfileCatalog({
+    workDir: '/nonexistent-kimi-test-workdir',
+    brandHomeDir: '/nonexistent-kimi-test-brandhome',
+    osHomeDir: '/nonexistent-kimi-test-oshome',
+  });
+}
+
 function fakeSession(
   parent: Agent,
   child: Agent,
   metadataAgents: Session['metadata']['agents'] = {},
+  sessionOptions?: {
+    config?: KimiConfig;
+    experimentalFlags?: FlagResolver;
+    providerManager?: Session['options']['providerManager'];
+  },
 ) {
   const agents = new Map<string, Agent>([['main', parent]]);
   if (metadataAgents['agent-0'] !== undefined) {
@@ -1597,7 +1906,16 @@ function fakeSession(
   }
   return {
     agents,
-    options: { kimiHomeDir: undefined },
+    options: {
+      kimiHomeDir: undefined,
+      config: sessionOptions?.config,
+      providerManager: sessionOptions?.providerManager,
+    },
+    get kimiConfig() {
+      return sessionOptions?.config;
+    },
+    experimentalFlags: sessionOptions?.experimentalFlags ?? new FlagResolver({}),
+    agentCatalog: testAgentCatalog(),
     metadata: {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
@@ -1675,6 +1993,7 @@ function profile(input: {
   readonly systemPrompt: string;
   readonly description?: string | undefined;
   readonly subagents?: Record<string, ResolvedAgentProfile> | undefined;
+  readonly modelPreference?: 'primary' | 'secondary';
 }): ResolvedAgentProfile {
   return {
     name: input.name,
@@ -1682,6 +2001,7 @@ function profile(input: {
     systemPrompt: () => input.systemPrompt,
     tools: [...input.tools],
     subagents: input.subagents,
+    modelPreference: input.modelPreference,
   };
 }
 

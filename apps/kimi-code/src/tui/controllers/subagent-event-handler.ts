@@ -9,6 +9,7 @@ import {
   agentSwarmDescriptionFromArgs,
   agentSwarmGridHeightForTerminalRows,
 } from '../components/messages/agent-swarm-progress';
+import { modelDisplayName } from '../components/dialogs/model-selector';
 import { MAIN_AGENT_ID } from '../constant/kimi-tui';
 import type {
   BackgroundAgentMetadata,
@@ -123,9 +124,24 @@ export class SubAgentEventHandler {
     } else if (event.type === 'agent.status.updated') {
       const usageObj = event.usage;
       const totalUsage = usageObj?.total ?? usageObj?.currentTurn;
+      // The bound model alias rides every child status update (emitted right
+      // after spawn); surface it on the subagent card. `modelDisplayName`
+      // falls back to the alias itself when the entry is unknown (e.g. the
+      // synthesized `__secondary__` derived entry is missing). Persist the
+      // resolved display back into `subagentInfo` so later events — which
+      // re-apply `setSubagentMeta` from it — cannot wipe the display (v1's
+      // `subagent.spawned` no longer carries a model).
+      const resolvedModel =
+        event.model === undefined
+          ? undefined
+          : modelDisplayName(event.model, this.host.state.appState.availableModels[event.model]);
+      if (resolvedModel !== undefined && info.model !== resolvedModel) {
+        this.subagentInfo.set(childAgentId, { ...info, model: resolvedModel });
+      }
       toolCall.updateSubagentMetrics({
         contextTokens: event.contextTokens,
         usage: totalUsage,
+        modelDisplay: resolvedModel,
       });
     }
     return true;
@@ -408,7 +424,6 @@ export class SubAgentEventHandler {
       progress.registerSubagent({
         agentId: event.subagentId,
         swarmIndex: event.swarmIndex,
-        model: event.model,
       });
     })) {
       return;
@@ -507,6 +522,17 @@ export class SubAgentEventHandler {
       progress.appendModelDelta({ agentId: subagentId, delta: event.delta });
     } else if (event.type === 'tool.call.started') {
       progress.recordToolCall({ agentId: subagentId, toolCallId: event.toolCallId });
+    } else if (event.type === 'agent.status.updated' && event.model !== undefined) {
+      // The bound model alias rides every child status update (emitted right
+      // after spawn). The panel shows the model once in the header instead of
+      // per cell — but only while every reported member agrees on it.
+      // `modelDisplayName` falls back to the alias itself when the entry is
+      // unknown (e.g. the synthesized `__secondary__` derived entry is
+      // missing).
+      progress.setMemberModel(
+        subagentId,
+        modelDisplayName(event.model, this.host.state.appState.availableModels[event.model]),
+      );
     }
   }
 

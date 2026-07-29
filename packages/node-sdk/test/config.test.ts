@@ -35,7 +35,6 @@ async function makeTempDir(): Promise<string> {
 
 const COMPLETE_TOML = `
 default_model = "kimi-for-coding"
-persist_default_model = false
 default_permission_mode = "auto"
 skip_afk_prompt_injection = false
 default_plan_mode = false
@@ -44,7 +43,6 @@ theme = "dark"
 show_thinking_stream = true
 merge_all_available_skills = true
 extra_skill_dirs = ["~/team-skills", ".agents/team-skills"]
-disabled_skills = ["review-helper", "legacy-helper"]
 
 [providers.kimi-for-coding]
 type = "kimi"
@@ -61,11 +59,6 @@ model = "kimi-for-coding"
 max_context_size = 262144
 capabilities = ["image_in", "thinking", "video_in"]
 display_name = "Kimi for Coding"
-
-[models.session-model]
-provider = "kimi-for-coding"
-model = "session-model"
-max_context_size = 262144
 
 [loop_control]
 max_retries_per_step = 3
@@ -135,14 +128,12 @@ max_context_size = "large"
     const config = parseConfigString(COMPLETE_TOML, 'complete.toml');
 
     expect(config.defaultModel).toBe('kimi-for-coding');
-    expect(config.persistDefaultModel).toBe(false);
     expect(config.thinking?.enabled).toBe(true);
     expect(config.thinking?.effort).toBe('high');
     expect(config.defaultPermissionMode).toBe('auto');
     expect(config.defaultPlanMode).toBe(false);
     expect(config.mergeAllAvailableSkills).toBe(true);
     expect(config.extraSkillDirs).toEqual(['~/team-skills', '.agents/team-skills']);
-    expect(config.disabledSkills).toEqual(['review-helper', 'legacy-helper']);
 
     const provider = config.providers['kimi-for-coding'];
     expect(provider).toMatchObject({
@@ -199,10 +190,8 @@ max_context_size = "large"
 
     const text = await readFile(configPath, 'utf-8');
     expect(text).toContain('default_model = "kimi-for-coding"');
-    expect(text).toContain('persist_default_model = false');
     expect(text).toContain('default_permission_mode = "auto"');
     expect(text).toContain('extra_skill_dirs = [ "~/team-skills", ".agents/team-skills" ]');
-    expect(text).toContain('disabled_skills = [ "review-helper", "legacy-helper" ]');
     expect(text).not.toContain('default_yolo');
     expect(text).toContain('max_steps_per_turn = 42');
     expect(text).toContain('display_name = "Kimi for Coding"');
@@ -307,30 +296,6 @@ describe('KimiHarness config API', () => {
     expect(text).toContain('claim_stale_after_ms = 15000');
   });
 
-  it('keeps default model and thinking session-only when persistence is disabled', async () => {
-    const homeDir = await makeTempDir();
-    const configPath = join(homeDir, 'config.toml');
-    await writeFile(configPath, COMPLETE_TOML, 'utf-8');
-    const before = await readFile(configPath, 'utf-8');
-    const harness = createKimiHarness({ homeDir, identity: TEST_IDENTITY });
-
-    const runtime = await harness.setConfig({
-      defaultModel: 'session-model',
-      thinking: { effort: 'low' },
-    });
-
-    expect(runtime).toMatchObject({
-      persistDefaultModel: false,
-      defaultModel: 'session-model',
-      thinking: { effort: 'low' },
-    });
-    await expect(readFile(configPath, 'utf-8')).resolves.toBe(before);
-    await expect(harness.getConfig({ reload: true })).resolves.toMatchObject({
-      defaultModel: 'session-model',
-      thinking: { effort: 'low' },
-    });
-  });
-
   it('does not write invalid config patches', async () => {
     const homeDir = await makeTempDir();
     const configPath = join(homeDir, 'config.toml');
@@ -381,12 +346,12 @@ describe('KimiHarness config API', () => {
         source: 'default',
       },
       {
-        id: 'subagent-model-selection',
-        title: 'Subagent model selection',
+        id: 'secondary-model',
+        title: 'Secondary model for subagents',
         description:
-          'Expose configured model aliases to collaboration tools and allow Agent and AgentSwarm to select a model for delegated work.',
+          'Let newly spawned subagents use a separately configured secondary model by default, with an explicit primary-model override for quality-sensitive tasks.',
         surface: 'core',
-        env: 'KIMI_CODE_EXPERIMENTAL_SUBAGENT_MODEL_SELECTION',
+        env: 'KIMI_CODE_EXPERIMENTAL_SECONDARY_MODEL',
         defaultEnabled: false,
         enabled: false,
         source: 'default',
