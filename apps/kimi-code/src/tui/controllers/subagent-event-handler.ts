@@ -384,6 +384,10 @@ export class SubAgentEventHandler {
       parentToolCallId: event.parentToolCallId,
       agentName: event.subagentName,
       description: typeof description === 'string' ? description : undefined,
+      model:
+        event.model === undefined
+          ? undefined
+          : modelDisplayName(event.model, this.host.state.appState.availableModels[event.model]),
     };
   }
 

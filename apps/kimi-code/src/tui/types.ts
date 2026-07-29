@@ -119,6 +119,8 @@ export interface BackgroundAgentMetadata {
   readonly parentToolCallId: string;
   readonly agentName?: string;
   readonly description?: string;
+  /** Display name of the model bound to the subagent (v2 spawns only). */
+  readonly model?: string;
 }
 
 export type BackgroundAgentStatusPhase = 'started' | 'completed' | 'failed';
