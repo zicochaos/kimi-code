@@ -99,8 +99,17 @@ export class AgentMediaToolsRegistrar extends Disposable implements IAgentMediaT
     let requester: ModelRequester | undefined;
     let model: Model | undefined;
     if (modelAlias !== '') {
-      requester = this.modelCatalog.getRequester(modelAlias);
-      model = requester.model;
+      // The bound alias may fail to resolve (config edited mid-session,
+      // tests with stub catalogs). Mirror profileService.tryResolveRawModel:
+      // fall back to no requester (media tools register without an uploader)
+      // instead of throwing inside the agent.status.updated listener.
+      try {
+        requester = this.modelCatalog.getRequester(modelAlias);
+        model = requester.model;
+      } catch {
+        requester = undefined;
+        model = undefined;
+      }
     }
     this.registration = registerMediaTools(this.toolRegistry, {
       fs: this.fs,
