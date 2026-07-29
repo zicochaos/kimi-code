@@ -31,7 +31,11 @@
  * in the synchronous segment before the first dispatch, so concurrent binds
  * cannot both pass (an edge-level guard always leaves an interleaving
  * window); a same-name rebind keeps the persisted thinking effort unless the
- * caller explicitly overrides it. `refreshSystemPrompt` never rejects: a
+ * caller explicitly overrides it. Prompt builds inject the enabled plugins'
+ * system-prompt sections (budget-capped, see `PLUGIN_SECTIONS_MAX_BYTES`);
+ * plugin changes reach the prompt when the session skill catalog re-pulls
+ * its plugin source on explicit plugin reload — the same point where plugin
+ * skills take effect. `refreshSystemPrompt` never rejects: a
  * failed context build keeps the current prompt and surfaces a warning,
  * because config and skill-catalog watchers fire it voided (an unhandled
  * rejection would crash kap-server) and the Session tool-policy fan-out
@@ -44,7 +48,7 @@
  * flag-gated tools (which every builtin profile lists) stay "known" even when
  * unregistered.
  * The mutable plain-data state (`activeToolNamesOverlay` / `agentsMdWarning`
- * / the two emitted-warning dedupe sets) is registered into `agentState`
+ * / the three emitted-warning dedupe sets) is registered into `agentState`
  * (`IAgentStateService`) and read/written through it; `optionsValue` (holds
  * the `cwd` / `chdir` / `emitStatusUpdated` callbacks) and `activeProfile`
  * (a `ResolvedAgentProfile` carrying the `systemPrompt` function) stay plain
@@ -85,6 +89,7 @@ import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceCo
 import { ISessionSkillCatalog } from '#/session/sessionSkillCatalog/skillCatalog';
 import { ISessionAgentProfileCatalog } from '#/session/sessionAgentProfileCatalog/sessionAgentProfileCatalog';
 import { ISessionToolPolicy } from '#/session/sessionToolPolicy/sessionToolPolicy';
+import { IPluginService } from '#/app/plugin/plugin';
 import type { ResolvedAgentProfile, SystemPromptContext } from '#/agent/profile/profile';
 import { IAgentStateService } from '#/agent/state/agentState';
 
@@ -152,6 +157,8 @@ function describeInactiveToolPattern(
   }
 }
 
+export const PLUGIN_SECTIONS_MAX_BYTES = 64 * 1024;
+
 export const profileActiveToolNamesOverlayKey = defineState<readonly string[] | undefined>(
   'profile.activeToolNamesOverlay',
   () => undefined as readonly string[] | undefined,
@@ -166,6 +173,10 @@ export const profileEmittedThinkingEffortWarningsKey = defineState<Set<string>>(
 );
 export const profileEmittedToolPatternWarningsKey = defineState<Set<string>>(
   'profile.emittedToolPatternWarnings',
+  () => new Set(),
+);
+export const profileEmittedPluginBudgetWarningsKey = defineState<Set<string>>(
+  'profile.emittedPluginBudgetWarnings',
   () => new Set(),
 );
 
@@ -203,12 +214,14 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     @IAgentProfileCatalogService private readonly builtinProfiles: IAgentProfileCatalogService,
     @IAgentStateService private readonly states: IAgentStateService,
     @IHostIdentity private readonly hostIdentity: IHostIdentity,
+    @IPluginService private readonly plugins: IPluginService,
   ) {
     super();
     this.states.register(profileActiveToolNamesOverlayKey);
     this.states.register(profileAgentsMdWarningKey);
     this.states.register(profileEmittedThinkingEffortWarningsKey);
     this.states.register(profileEmittedToolPatternWarningsKey);
+    this.states.register(profileEmittedPluginBudgetWarningsKey);
     this.configure({});
     this._register(
       this.sessionToolPolicy.onDidChange((event) => {
@@ -252,6 +265,10 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
 
   private get emittedToolPatternWarnings(): Set<string> {
     return this.states.get(profileEmittedToolPatternWarningsKey);
+  }
+
+  private get emittedPluginBudgetWarnings(): Set<string> {
+    return this.states.get(profileEmittedPluginBudgetWarningsKey);
   }
 
   configure(options: ProfileServiceOptions): void {
@@ -859,6 +876,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
       },
     );
     const skills = await this.resolveSkillListing();
+    const pluginSections = await this.resolvePluginSections();
     return {
       ...base,
       cwd: effectiveCwd,
@@ -867,6 +885,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
       shellPath: this.env.shellPath,
       now: new Date().toISOString(),
       skills,
+      pluginSections,
       skillActive: this.isToolActiveForProfile(profile, 'Skill'),
       productName: this.hostIdentity.productName,
       replyStyleGuide: this.hostIdentity.replyStyleGuide,
@@ -896,6 +915,37 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     } catch {
       return '';
     }
+  }
+
+  private async resolvePluginSections(): Promise<string> {
+    const sections = await this.plugins.enabledSystemPrompts();
+    const parts: string[] = [];
+    const skipped: string[] = [];
+    let totalBytes = 0;
+    for (const section of sections) {
+      const block = `<!-- From: plugin ${section.pluginId} -->\n${section.content}`;
+      const bytes = Buffer.byteLength(block, 'utf8');
+      if (totalBytes + bytes > PLUGIN_SECTIONS_MAX_BYTES) {
+        skipped.push(section.pluginId);
+        continue;
+      }
+      totalBytes += bytes;
+      parts.push(block);
+    }
+    if (skipped.length > 0) {
+      const newlySkipped = skipped.filter((id) => !this.emittedPluginBudgetWarnings.has(id));
+      if (newlySkipped.length > 0) {
+        for (const id of newlySkipped) this.emittedPluginBudgetWarnings.add(id);
+        this.eventBus.publish({
+          type: 'warning',
+          message:
+            `Plugin system-prompt contributions from ${newlySkipped.map((id) => `"${id}"`).join(', ')} ` +
+            `were skipped: the aggregate ${PLUGIN_SECTIONS_MAX_BYTES / 1024} KB budget is exhausted.`,
+          code: 'plugin-sections-oversized',
+        });
+      }
+    }
+    return parts.join('\n\n');
   }
 
   private readConfiguredCwd(): string | undefined {
