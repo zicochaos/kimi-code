@@ -19,10 +19,12 @@ The package is layered; keep the layers strict when changing code:
   wire's `null`-vs-`undefined` semantics — use them for every
   `X | undefined` / `void` result.
 - **Transports** (`src/transports/{ipc,memory}`) — each implements the
-  `KlientChannel` SPI (`src/core/channel.ts`) and nothing else. ipc frames
-  the same dispatcher traffic as NDJSON over a unix socket and shares the
-  in-process dispatcher with memory; memory JSON round-trips every value so
-  both transports return byte-identical data.
+  `KlientChannel` SPI (`src/core/channel.ts`) and nothing else. The transport
+  is chosen once at creation via subpath entry
+  (`@moonshot-ai/klient/ipc|memory`); both return the same `Klient`. ipc
+  frames the same dispatcher traffic as NDJSON over a unix socket and shares
+  the in-process dispatcher with memory; memory JSON round-trips every value
+  so both transports return byte-identical data.
 
 The facade only covers services that behave identically on both transports
 (the in-process dispatcher mirrors the server's scope resolution, including
