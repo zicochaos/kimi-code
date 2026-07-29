@@ -21,12 +21,14 @@ export function formatBackgroundAgentTranscript(
 ): BackgroundAgentStatusData {
   const normalizedAgentName = normalizeBackgroundField(meta.agentName);
   const subject = normalizedAgentName !== undefined ? `${normalizedAgentName} agent` : 'agent';
+  const model = normalizeBackgroundField(meta.model);
+  const subjectWithModel = model === undefined ? subject : `${subject} (${model})`;
   const headline =
     phase === 'started'
-      ? `${subject} started in background`
+      ? `${subjectWithModel} started in background`
       : phase === 'completed'
-        ? `${subject} completed in background`
-        : `${subject} failed in background`;
+        ? `${subjectWithModel} completed in background`
+        : `${subjectWithModel} failed in background`;
   const tail = phase === 'failed' ? normalizeBackgroundField(extras?.error) : undefined;
   const detailParts = [normalizeBackgroundField(meta.description), tail].filter(
     (part): part is string => part !== undefined,

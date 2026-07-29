@@ -3,10 +3,36 @@ import { describe, expect, it } from 'vitest';
 
 import { BackgroundAgentStatusComponent } from '#/tui/components/messages/background-agent-status';
 import { STATUS_BULLET } from '#/tui/constant/symbols';
+import { formatBackgroundAgentTranscript } from '#/tui/utils/background-agent-status';
 
 function strip(text: string): string {
   return text.replaceAll(/\u001B\[[0-9;]*m/g, '');
 }
+
+describe('formatBackgroundAgentTranscript', () => {
+  it('includes the bound model in the headline when known', () => {
+    const status = formatBackgroundAgentTranscript('started', {
+      agentId: 'agent-1',
+      parentToolCallId: 'call-1',
+      agentName: 'coder',
+      description: 'Implement the fix',
+      model: 'GLM 5.2',
+    });
+
+    expect(status.headline).toBe('coder agent (GLM 5.2) started in background');
+    expect(status.detail).toBe('Implement the fix');
+  });
+
+  it('falls back to the plain headline when the model is unknown', () => {
+    const status = formatBackgroundAgentTranscript('started', {
+      agentId: 'agent-1',
+      parentToolCallId: 'call-1',
+      agentName: 'coder',
+    });
+
+    expect(status.headline).toBe('coder agent started in background');
+  });
+});
 
 describe('BackgroundAgentStatusComponent', () => {
   it('renders started/completed with the shared bullet and failed with a red x marker', () => {
