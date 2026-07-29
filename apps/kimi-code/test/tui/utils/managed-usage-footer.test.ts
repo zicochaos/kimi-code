@@ -62,6 +62,20 @@ describe('buildManagedUsageFooterView', () => {
     });
   });
 
+  it('keeps the window duration in multi-week labels', () => {
+    const view = buildManagedUsageFooterView(
+      {
+        summary: null,
+        limits: [{ window: { duration: 2, unit: 'week' }, used: 25, limit: 100 }],
+      },
+      null,
+    );
+    expect(view).toEqual({
+      kind: 'ok',
+      parts: [{ text: '2w: 25%', severity: 'ok' }],
+    });
+  });
+
   it('treats a zero limit as 0% with ok severity', () => {
     const view = buildManagedUsageFooterView(
       {

@@ -24,7 +24,6 @@ export type ManagedUsageFooterView =
 function compactRowLabel(row: ManagedUsageRow): string {
   const window = row.window;
   if (window !== undefined) {
-    if (window.unit === 'week') return '1w';
     return `${String(window.duration)}${window.unit[0] ?? ''}`;
   }
   return row.name ?? 'Limit';
