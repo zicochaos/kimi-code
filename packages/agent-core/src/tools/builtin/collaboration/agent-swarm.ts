@@ -4,21 +4,12 @@ import type { SwarmMode } from '../../../agent/swarm';
 import type { BuiltinTool } from '../../../agent/tool';
 import {
   DEFAULT_SUBAGENT_TIMEOUT_MS,
-  SUBAGENT_MODEL_UNAVAILABLE_MESSAGE,
   type QueuedSubagentTask,
   type SessionSubagentHost,
 } from '../../../session/subagent-host';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { toInputJsonSchema } from '../../support/input-schema';
-import {
-  formatSubagentModelDirectory,
-  isSelectableSubagentModelAlias,
-  normalizeSubagentModelAlias,
-  parametersWithSubagentModelSelection,
-  subagentApprovalAgentName,
-  type SubagentModelDirectoryOptions,
-} from '../../support/subagent-model-directory';
 import AGENT_SWARM_DESCRIPTION from './agent-swarm.md?raw';
 
 const DEFAULT_SUBAGENT_TYPE = 'coder';
@@ -41,11 +32,10 @@ export const AgentSwarmToolInputSchema = z
         'Subagent type used for every new subagent spawned from items; defaults to coder when omitted. Resumed subagents always keep their original type, so passing subagent_type together with resume_agent_ids is allowed — it only affects the item-based spawns.',
       ),
     model: z
-      .string()
-      .min(1)
+      .enum(['primary', 'secondary'])
       .optional()
       .describe(
-        'Configured model alias used for every subagent in this swarm. Omit to inherit the caller model. See the available model directory in this tool description.',
+        'Model for every new subagent spawned from items: "secondary" uses the configured secondary model (the default when one is set), "primary" uses the model you are running on. Resumed subagents keep their bound model.',
       ),
     prompt_template: z
       .string()
@@ -101,6 +91,8 @@ interface SwarmRunResult {
 
 export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
   readonly name = 'AgentSwarm' as const;
+  readonly description: string;
+  readonly parameters: Record<string, unknown> = toInputJsonSchema(AgentSwarmToolInputSchema);
 
   constructor(
     private readonly subagentHost: SessionSubagentHost,
@@ -108,105 +100,36 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
     // `0` = no timeout, preserved on purpose (`0 ?? DEFAULT` stays `0`);
     // SubagentBatch arms no timer for non-positive timeouts.
     private readonly subagentTimeoutMs?: number,
-    private readonly modelDirectory?: () => SubagentModelDirectoryOptions,
-    modelSelectionEnabled: boolean | (() => boolean) = false,
-    private readonly resolveModelAlias?: (requestedModelAlias?: string) => string | undefined,
+    subagentModelDescription?: string,
   ) {
-    this.isModelSelectionEnabled =
-      typeof modelSelectionEnabled === 'function'
-        ? modelSelectionEnabled
-        : () => modelSelectionEnabled;
-    this.modelSelectionParameters = toInputJsonSchema(AgentSwarmToolInputSchema);
-    this.defaultParameters = parametersWithSubagentModelSelection(
-      this.modelSelectionParameters,
-      false,
-    );
-  }
-
-  private readonly isModelSelectionEnabled: () => boolean;
-  private readonly modelSelectionParameters: Record<string, unknown>;
-  private readonly defaultParameters: Record<string, unknown>;
-
-  get parameters(): Record<string, unknown> {
-    return this.isModelSelectionEnabled()
-      ? this.modelSelectionParameters
-      : this.defaultParameters;
-  }
-
-  get description(): string {
-    if (!this.isModelSelectionEnabled()) return AGENT_SWARM_DESCRIPTION;
-    const directory = formatSubagentModelDirectory(this.modelDirectory?.() ?? {});
-    return `${AGENT_SWARM_DESCRIPTION}\n\n${directory}`;
+    this.description =
+      subagentModelDescription === undefined
+        ? AGENT_SWARM_DESCRIPTION
+        : `${AGENT_SWARM_DESCRIPTION}\n\n${subagentModelDescription}`;
   }
 
   resolveExecution(args: AgentSwarmToolInput): ToolExecution {
-    const itemCount = args.items?.length ?? 0;
-    const hasSpawnItems = itemCount > 0;
-    const modelSelectionEnabled = this.isModelSelectionEnabled();
-    if (hasSpawnItems && args.model !== undefined && !modelSelectionEnabled) {
-      return {
-        output:
-          'Subagent model selection is disabled. Enable the subagent-model-selection experimental feature to use model.',
-        isError: true,
-      };
-    }
-    const requestedModelAlias = hasSpawnItems
-      ? normalizeSubagentModelAlias(args.model)
-      : undefined;
-    let modelAlias: string | undefined;
-    try {
-      if (
-        hasSpawnItems &&
-        modelSelectionEnabled &&
-        requestedModelAlias !== undefined &&
-        this.modelDirectory !== undefined &&
-        !isSelectableSubagentModelAlias(this.modelDirectory().models, requestedModelAlias)
-      ) {
-        throw new Error('Requested model alias is not in the exposed directory');
-      }
-      modelAlias = hasSpawnItems && modelSelectionEnabled
-        ? (this.resolveModelAlias?.(requestedModelAlias) ?? requestedModelAlias)
-        : undefined;
-    } catch {
-      return { output: SUBAGENT_MODEL_UNAVAILABLE_MESSAGE, isError: true };
-    }
-    const agentCount = itemCount + Object.keys(args.resume_agent_ids ?? {}).length;
-    const agentName = subagentApprovalAgentName(
-      `swarm (${agentCount} subagents)`,
-      modelAlias,
-    );
+    const agentCount = (args.items?.length ?? 0) + Object.keys(args.resume_agent_ids ?? {}).length;
     return {
       accesses: ToolAccesses.all(),
       description: `Launching agent swarm: ${args.description}`,
       display: {
         kind: 'agent_call',
-        agent_name: agentName,
+        agent_name: `swarm (${agentCount} subagents)`,
         prompt: args.description,
       },
       approvalRule: this.name,
-      execute: (ctx) => this.execution(args, ctx, modelSelectionEnabled, modelAlias),
+      execute: (ctx) => this.execution(args, ctx),
     };
   }
 
   private async execution(
     args: AgentSwarmToolInput,
     context: ExecutableToolContext,
-    modelSelectionEnabled: boolean,
-    approvedModelAlias?: string,
   ): Promise<ExecutableToolResult> {
     try {
-      if ((args.items?.length ?? 0) > 0 && args.model !== undefined && !modelSelectionEnabled) {
-        throw new Error(
-          'Subagent model selection is disabled. Enable the subagent-model-selection experimental feature to use model.',
-        );
-      }
       this.swarmMode.enter('tool');
-      const result = await this.runSwarm(
-        args,
-        context.signal,
-        context.toolCallId,
-        modelSelectionEnabled ? approvedModelAlias : undefined,
-      );
+      const result = await this.runSwarm(args, context.signal, context.toolCallId);
       return {
         output: result,
       };
@@ -222,7 +145,6 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
     args: AgentSwarmToolInput,
     signal: AbortSignal,
     toolCallId: string,
-    modelAlias?: string,
   ): Promise<string> {
     const profileName = normalizeOptionalString(args.subagent_type) ?? DEFAULT_SUBAGENT_TYPE;
     const specs = createAgentSwarmSpecs(args, (agentId) => this.subagentHost.getSwarmItem(agentId));
@@ -234,12 +156,12 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
         parentToolCallId: toolCallId,
         prompt: spec.prompt,
         description: childDescription(args.description, spec.index, descriptionName),
-        modelAlias,
         swarmIndex: spec.index,
         runInBackground: false,
         swarmItem: spec.item,
         signal,
         timeout: this.subagentTimeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS,
+        modelChoice: args.model,
       };
       if (spec.kind === 'resume') {
         return {

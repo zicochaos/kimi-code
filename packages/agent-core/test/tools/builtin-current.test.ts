@@ -81,6 +81,7 @@ function mockSubagentHost<T extends Partial<SessionSubagentHost>>(
     resume: vi.fn(),
     runQueued: vi.fn(),
     getSwarmItem: vi.fn(),
+    delegatableSubagents: vi.fn(() => ({})),
     ...host,
   } as unknown as T & SessionSubagentHost;
 }
@@ -706,28 +707,6 @@ describe('current builtin collaboration tools', () => {
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
-  });
-
-  it('AgentSwarm ignores model selection for a resume-only swarm', async () => {
-    const host = mockSubagentHost({ runQueued: vi.fn().mockResolvedValue([]) });
-    const tool = new AgentSwarmTool(host, mockSwarmMode());
-
-    const result = await executeTool(
-      tool,
-      context(
-        {
-          description: 'Resume review',
-          resume_agent_ids: { 'agent-old-1': 'Continue previous review A' },
-          model: 'example/unavailable-model',
-        },
-        'call_swarm',
-      ),
-    );
-
-    expect(result.isError).toBeUndefined();
-    expect(host.runQueued).toHaveBeenCalledWith([
-      expect.objectContaining({ kind: 'resume', resumeAgentId: 'agent-old-1' }),
-    ]);
   });
 
   it('AgentSwarm reports failed subagents inside the XML result without failing the tool', async () => {

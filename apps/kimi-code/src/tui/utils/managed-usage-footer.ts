@@ -18,6 +18,19 @@ export type ManagedUsageFooterView =
   | { readonly kind: 'ok'; readonly parts: readonly ManagedUsageFooterPart[] };
 
 /**
+ * Compact row label for the footer, e.g. `1w` / `5h`. Mirrors the usage
+ * panel's `usageRowLabel` but keeps the short form (footer space is tight).
+ */
+function compactRowLabel(row: ManagedUsageRow): string {
+  const window = row.window;
+  if (window !== undefined) {
+    if (window.unit === 'week') return '1w';
+    return `${String(window.duration)}${window.unit[0] ?? ''}`;
+  }
+  return row.name ?? 'Limit';
+}
+
+/**
  * Build the structured left-slot content for the footer plan-quota line.
  * Returns null when there is nothing to render (no error and no rows).
  */
@@ -37,9 +50,8 @@ export function buildManagedUsageFooterView(
 
   const parts = rows.map((row) => {
     const pct = usagePercent(row.used, row.limit);
-    const label = row.label.replace(/\s+limit$/i, '');
     const severity = ratioSeverity(row.limit > 0 ? row.used / row.limit : 0);
-    return { text: `${label}: ${String(pct)}%`, severity };
+    return { text: `${compactRowLabel(row)}: ${String(pct)}%`, severity };
   });
   return { kind: 'ok', parts };
 }

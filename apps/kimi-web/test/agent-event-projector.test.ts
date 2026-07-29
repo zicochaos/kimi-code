@@ -64,6 +64,40 @@ describe('subagent streaming text', () => {
     const events = projector.project('assistant.delta', { agentId: 'sub-1', delta: '' }, 's1');
     expect(events).toEqual([]);
   });
+
+  it('patches the subagent task model from a child agent.status.updated', () => {
+    const projector = createAgentProjector();
+
+    const events = projector.project(
+      'agent.status.updated',
+      { agentId: 'sub-1', model: 'example/test-model' },
+      's1',
+    );
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'taskCreated',
+        sessionId: 's1',
+        task: expect.objectContaining({ id: 'sub-1', model: 'example/test-model' }),
+      }),
+    ]);
+
+    // A repeated status with the same model is a no-op; a different one re-emits.
+    expect(
+      projector.project('agent.status.updated', { agentId: 'sub-1', model: 'example/test-model' }, 's1'),
+    ).toEqual([]);
+    expect(
+      projector.project('agent.status.updated', { agentId: 'sub-1', model: 'example/other-model' }, 's1'),
+    ).toEqual([
+      expect.objectContaining({
+        type: 'taskCreated',
+        task: expect.objectContaining({ id: 'sub-1', model: 'example/other-model' }),
+      }),
+    ]);
+
+    // Status updates without a model stay silent.
+    expect(projector.project('agent.status.updated', { agentId: 'sub-1' }, 's1')).toEqual([]);
+  });
 });
 
 describe('agent error projection', () => {

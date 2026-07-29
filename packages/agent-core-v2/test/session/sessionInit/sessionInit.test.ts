@@ -32,6 +32,7 @@ describe('SessionInitService', () => {
   let events: unknown[];
   let appendSystemReminder: ReturnType<typeof vi.fn>;
   let flush: ReturnType<typeof vi.fn>;
+  let republishStatus: ReturnType<typeof vi.fn>;
   let create: ReturnType<typeof vi.fn>;
   let run: ReturnType<typeof vi.fn>;
   let runCompletion: Promise<{ summary: string; usage?: undefined }>;
@@ -42,6 +43,9 @@ describe('SessionInitService', () => {
     events = [];
     appendSystemReminder = vi.fn();
     flush = vi.fn(async () => {});
+    republishStatus = vi.fn(() => {
+      events.push({ type: 'agent.status.updated', model: 'mock-model' });
+    });
     runCompletion = Promise.resolve({ summary: 'Explored and wrote AGENTS.md', usage: undefined });
 
     const handles: Record<string, { id: string; accessor: { get: (id: unknown) => unknown } }> = {};
@@ -90,6 +94,7 @@ describe('SessionInitService', () => {
       accessor: {
         get: (id: unknown) => {
           if (id === IAgentPermissionModeService) return permissionMode;
+          if (id === IAgentProfileService) return { republishStatus };
           return undefined;
         },
       },
@@ -160,6 +165,10 @@ describe('SessionInitService', () => {
         callerAgentId: 'main',
       }),
     );
+    expect(republishStatus).toHaveBeenCalledTimes(1);
+    const eventTypes = events.map((event) => (event as { type?: string }).type);
+    const spawnedIndex = eventTypes.indexOf('subagent.spawned');
+    expect(eventTypes[spawnedIndex + 1]).toBe('agent.status.updated');
     expect(events).toContainEqual(
       expect.objectContaining({ type: 'subagent.completed', subagentId: 'agent-0' }),
     );

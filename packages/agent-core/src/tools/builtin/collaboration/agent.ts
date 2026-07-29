@@ -26,7 +26,6 @@ import type { ResolvedAgentProfile } from '../../../profile';
 import {
   DEFAULT_SUBAGENT_TIMEOUT_MS,
   formatSubagentTimeoutDescription,
-  SUBAGENT_MODEL_UNAVAILABLE_MESSAGE,
   type SessionSubagentHost,
   type SubagentHandle,
 } from '../../../session/subagent-host';
@@ -34,14 +33,6 @@ import { isUserCancellation } from '../../../utils/abort';
 import { AgentBackgroundTask, type BackgroundManager } from '../../../agent/background';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { matchesGlobRuleSubject } from '../../support/rule-match';
-import {
-  formatSubagentModelDirectory,
-  isSelectableSubagentModelAlias,
-  normalizeSubagentModelAlias,
-  parametersWithSubagentModelSelection,
-  subagentApprovalAgentName,
-  type SubagentModelDirectoryOptions,
-} from '../../support/subagent-model-directory';
 import AGENT_BACKGROUND_DISABLED_DESCRIPTION from './agent-background-disabled.md?raw';
 import AGENT_BACKGROUND_DESCRIPTION from './agent-background-enabled.md?raw';
 import AGENT_DESCRIPTION_BASE from './agent.md?raw';
@@ -76,11 +67,10 @@ export const AgentToolInputSchema = z.preprocess(
         'One of the available agent types (see "Available agent types" in this tool description). Defaults to "coder" when omitted.',
       ),
     model: z
-      .string()
-      .min(1)
+      .enum(['primary', 'secondary'])
       .optional()
       .describe(
-        'Configured model alias for this subagent. Omit to inherit the caller model. See the available model directory in this tool description.',
+        'Model for the new subagent: "secondary" uses the configured secondary model (the default when one is set), "primary" uses the model you are running on. Only applies when spawning a new agent — a resumed agent keeps its bound model.',
       ),
     resume: z
       .string()
@@ -122,6 +112,8 @@ const BACKGROUND_AGENT_UNAVAILABLE =
 
 export class AgentTool implements BuiltinTool<AgentToolInput> {
   readonly name: string = 'Agent';
+  readonly description: string;
+  readonly parameters: Record<string, unknown> = toInputJsonSchema(AgentToolInputSchema);
   constructor(
     private readonly subagentHost: SessionSubagentHost,
     private readonly backgroundManager: BackgroundManager,
@@ -130,9 +122,8 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       log?: Logger;
       allowBackground?: boolean | undefined;
       subagentTimeoutMs?: number | undefined;
-      modelDirectory?: () => SubagentModelDirectoryOptions;
-      modelSelectionEnabled?: boolean | (() => boolean);
-      resolveModelAlias?: (requestedModelAlias?: string) => string | undefined;
+      subagentModelDescription?: string;
+      showModelPreferences?: boolean;
     },
   ) {
     const log = options?.log;
@@ -140,80 +131,32 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     // `0` is preserved (not normalized): `0 ?? DEFAULT_SUBAGENT_TIMEOUT_MS`
     // stays `0`, and the BackgroundManager arms no timer for it.
     this.subagentTimeoutMs = options?.subagentTimeoutMs;
-    const typeLines = buildSubagentDescriptions(subagents);
+    const typeLines = buildSubagentDescriptions(
+      subagents,
+      options?.showModelPreferences ?? false,
+    );
     const baseDescription = `${AGENT_DESCRIPTION_BASE}\n\n${
       this.allowBackground ? AGENT_BACKGROUND_DESCRIPTION : AGENT_BACKGROUND_DISABLED_DESCRIPTION
     }`;
-    this.baseDescription = typeLines
-      ? `${baseDescription}\n\nAvailable agent types (pass via subagent_type):\n${typeLines}`
-      : baseDescription;
-    this.modelDirectory = options?.modelDirectory;
-    const modelSelectionEnabled = options?.modelSelectionEnabled ?? false;
-    this.isModelSelectionEnabled =
-      typeof modelSelectionEnabled === 'function'
-        ? modelSelectionEnabled
-        : () => modelSelectionEnabled;
-    this.resolveModelAlias = options?.resolveModelAlias;
-    this.modelSelectionParameters = toInputJsonSchema(AgentToolInputSchema);
-    this.defaultParameters = parametersWithSubagentModelSelection(
-      this.modelSelectionParameters,
-      false,
-    );
+    const sections = [baseDescription];
+    if (typeLines) {
+      sections.push(`Available agent types (pass via subagent_type):\n${typeLines}`);
+    }
+    if (options?.subagentModelDescription !== undefined) {
+      sections.push(options.subagentModelDescription);
+    }
+    this.description = sections.join('\n\n');
     this.log = log;
   }
 
-  private readonly baseDescription: string;
   private readonly log?: Logger;
   private readonly allowBackground: boolean;
   private readonly subagentTimeoutMs?: number;
-  private readonly modelDirectory?: () => SubagentModelDirectoryOptions;
-  private readonly isModelSelectionEnabled: () => boolean;
-  private readonly resolveModelAlias?: (requestedModelAlias?: string) => string | undefined;
-  private readonly modelSelectionParameters: Record<string, unknown>;
-  private readonly defaultParameters: Record<string, unknown>;
-
-  get parameters(): Record<string, unknown> {
-    return this.isModelSelectionEnabled()
-      ? this.modelSelectionParameters
-      : this.defaultParameters;
-  }
-
-  get description(): string {
-    if (!this.isModelSelectionEnabled()) return this.baseDescription;
-    const directory = formatSubagentModelDirectory(this.modelDirectory?.() ?? {});
-    return `${this.baseDescription}\n\n${directory}`;
-  }
 
   async resolveExecution(args: AgentToolInput): Promise<ToolExecution> {
-    const resumeAgentId = args.resume?.trim();
-    const isResume = resumeAgentId !== undefined && resumeAgentId.length > 0;
-    const modelSelectionEnabled = this.isModelSelectionEnabled();
-    if (!isResume && args.model !== undefined && !modelSelectionEnabled) {
-      throw new Error(
-        'Subagent model selection is disabled. Enable the subagent-model-selection experimental feature to use model.',
-      );
-    }
-    let modelAlias = isResume ? undefined : normalizeSubagentModelAlias(args.model);
-    if (!isResume && modelSelectionEnabled) {
-      try {
-        if (
-          modelAlias !== undefined &&
-          this.modelDirectory !== undefined &&
-          !isSelectableSubagentModelAlias(this.modelDirectory().models, modelAlias)
-        ) {
-          throw new Error('Requested model alias is not in the exposed directory');
-        }
-        modelAlias = this.resolveModelAlias?.(modelAlias) ?? modelAlias;
-      } catch (error) {
-        this.log?.warn('subagent model selection preflight failed', { modelAlias, error });
-        return {
-          output: `subagent error: ${SUBAGENT_MODEL_UNAVAILABLE_MESSAGE}`,
-          isError: true,
-        };
-      }
-    }
     let profileName = args.subagent_type?.length ? args.subagent_type : 'coder';
-    if (isResume) {
+    const resumeAgentId = args.resume?.trim();
+    if (resumeAgentId !== undefined && resumeAgentId.length > 0) {
       profileName = (await this.subagentHost.getProfileName?.(resumeAgentId)) ?? 'subagent';
     }
     const prefix = args.run_in_background === true ? 'Launching background' : 'Launching';
@@ -222,13 +165,13 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       accesses: ToolAccesses.none(),
       display: {
         kind: 'agent_call',
-        agent_name: subagentApprovalAgentName(profileName, modelAlias),
+        agent_name: profileName,
         prompt: args.prompt,
         background: args.run_in_background,
       },
       approvalRule: this.name,
       matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, profileName),
-      execute: (ctx) => this.execution(args, ctx, modelSelectionEnabled, modelAlias),
+      execute: (ctx) => this.execution(args, ctx),
     };
   }
 
@@ -238,24 +181,17 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       toolCallId,
       signal,
     }: ExecutableToolContext,
-    modelSelectionEnabled: boolean,
-    approvedModelAlias?: string,
   ): Promise<ExecutableToolResult> {
     try {
       signal.throwIfAborted();
       const runInBackground = args.run_in_background === true;
       const requestedProfileName = args.subagent_type?.length ? args.subagent_type : undefined;
       const resumeAgentId = args.resume?.trim();
-      const isResume = resumeAgentId !== undefined && resumeAgentId.length > 0;
-      if (!isResume && args.model !== undefined && !modelSelectionEnabled) {
-        return {
-          output:
-            'Subagent model selection is disabled. Enable the subagent-model-selection experimental feature to use model.',
-          isError: true,
-        };
-      }
-      const modelAlias = !isResume && modelSelectionEnabled ? approvedModelAlias : undefined;
-      if (isResume && requestedProfileName !== undefined) {
+      if (
+        resumeAgentId !== undefined &&
+        resumeAgentId.length > 0 &&
+        requestedProfileName !== undefined
+      ) {
         return {
           output: 'Cannot set subagent_type when resuming an existing agent. Resume by agent id only.',
           isError: true,
@@ -282,7 +218,6 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         parentToolCallId: toolCallId,
         prompt: args.prompt,
         description: args.description,
-        modelAlias: modelSelectionEnabled ? modelAlias : undefined,
         runInBackground,
         signal: controller.signal,
       };
@@ -293,6 +228,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
             ? await this.subagentHost.resume(resumeAgentId!, runOptions)
             : await this.subagentHost.spawn({
                 profileName: requestedProfileName ?? 'coder',
+                modelChoice: args.model,
                 ...runOptions,
               });
       } catch (error) {
@@ -454,7 +390,10 @@ function launchErrorMessage(error: unknown, signal: AbortSignal): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function buildSubagentDescriptions(subagents: ResolvedAgentProfile['subagents']): string {
+function buildSubagentDescriptions(
+  subagents: ResolvedAgentProfile['subagents'],
+  showModelPreferences: boolean,
+): string {
   if (subagents === undefined) return '';
   return Object.entries(subagents)
     .map(([name, subagent]) => {
@@ -462,8 +401,19 @@ function buildSubagentDescriptions(subagents: ResolvedAgentProfile['subagents'])
         (part): part is string => part !== undefined && part.length > 0,
       );
       const header = details.length === 0 ? `- ${name}` : `- ${name}: ${details.join(' ')}`;
-      if (subagent.tools.length === 0) return header;
-      return `${header}\n  Tools: ${subagent.tools.join(', ')}`;
+      const deniedExact = new Set(
+        (subagent.disallowedTools ?? []).filter((tool) => !tool.startsWith('mcp__')),
+      );
+      const shownTools = subagent.tools.filter((tool) => !deniedExact.has(tool));
+      const lines = [header];
+      if (showModelPreferences && subagent.modelPreference !== undefined) {
+        lines.push(`  Model preference: ${subagent.modelPreference}`);
+      }
+      if (shownTools.length > 0) lines.push(`  Tools: ${shownTools.join(', ')}`);
+      if (subagent.disallowedTools !== undefined && subagent.disallowedTools.length > 0) {
+        lines.push(`  Disabled: ${subagent.disallowedTools.join(', ')}`);
+      }
+      return lines.join('\n');
     })
     .join('\n');
 }

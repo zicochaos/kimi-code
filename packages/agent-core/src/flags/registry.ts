@@ -33,11 +33,11 @@ export const FLAG_DEFINITIONS = [
     surface: 'core',
   },
   {
-    id: 'subagent-model-selection',
-    title: 'Subagent model selection',
+    id: 'secondary-model',
+    title: 'Secondary model for subagents',
     description:
-      'Expose configured model aliases to collaboration tools and allow Agent and AgentSwarm to select a model for delegated work.',
-    env: 'KIMI_CODE_EXPERIMENTAL_SUBAGENT_MODEL_SELECTION',
+      'Let newly spawned subagents use a separately configured secondary model by default, with an explicit primary-model override for quality-sensitive tasks.',
+    env: 'KIMI_CODE_EXPERIMENTAL_SECONDARY_MODEL',
     default: false,
     surface: 'core',
   },

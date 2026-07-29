@@ -654,6 +654,10 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     });
   }
 
+  republishStatus(): void {
+    this.emitStatusUpdated(true);
+  }
+
   private get profileState(): ProfileModelState {
     return this.wire.getModel(ProfileModel);
   }

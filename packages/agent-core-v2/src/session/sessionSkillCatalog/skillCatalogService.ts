@@ -112,7 +112,7 @@ export class SessionSkillCatalogService
     // Drain in a loop so a reload enqueued while we await an earlier tail is
     // not observed as already-settled by a single snapshot of the map.
     while (this.sourceLoadTails.size > 0) {
-      await Promise.all([...this.sourceLoadTails.values()]);
+      await Promise.all(this.sourceLoadTails.values());
     }
   }
 

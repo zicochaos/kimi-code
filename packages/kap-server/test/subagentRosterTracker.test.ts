@@ -55,6 +55,25 @@ describe('SubagentRosterTracker', () => {
     expect(t.get(SID)[0]?.parent_tool_call_id).toBeUndefined();
   });
 
+  it('learns the bound model from the child agent.status.updated when spawned lacks it', () => {
+    const t = new SubagentRosterTracker();
+    t.apply(SID, spawn('agent-1', { model: undefined }));
+    expect(t.get(SID)[0]?.model).toBeUndefined();
+
+    t.apply(SID, ev({ type: 'agent.status.updated', agentId: 'agent-1', model: 'example/test-model' }));
+    expect(t.get(SID)[0]?.model).toBe('example/test-model');
+
+    // A later status update must not churn the recorded model.
+    t.apply(SID, ev({ type: 'agent.status.updated', agentId: 'agent-1', model: 'example/other-model' }));
+    expect(t.get(SID)[0]?.model).toBe('example/test-model');
+  });
+
+  it('ignores status updates for agents outside the roster', () => {
+    const t = new SubagentRosterTracker();
+    t.apply(SID, ev({ type: 'agent.status.updated', agentId: 'agent-unknown', model: 'example/test-model' }));
+    expect(t.get(SID)).toEqual([]);
+  });
+
   it('skips background subagents — REST /tasks already serves them after a refresh', () => {
     const t = new SubagentRosterTracker();
     t.apply(SID, spawn('agent-1', { runInBackground: true }));

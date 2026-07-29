@@ -7,8 +7,8 @@ import {
 } from '#/tui/utils/managed-usage-footer';
 
 const sampleUsage: ManagedUsageReport = {
-  summary: { label: '1w limit', used: 12, limit: 100 },
-  limits: [{ label: '5h limit', used: 40, limit: 100 }],
+  summary: { window: { duration: 1, unit: 'week' }, used: 12, limit: 100 },
+  limits: [{ window: { duration: 5, unit: 'hour' }, used: 40, limit: 100 }],
   extraUsage: null,
 };
 
@@ -43,20 +43,20 @@ describe('buildManagedUsageFooterView', () => {
     });
   });
 
-  it('strips a trailing "limit" from labels and maps severity by ratio', () => {
+  it('labels rows from their window or name and maps severity by ratio', () => {
     const usage: ManagedUsageReport = {
-      summary: { label: 'Weekly limit', used: 60, limit: 100 },
+      summary: { window: { duration: 1, unit: 'week' }, used: 60, limit: 100 },
       limits: [
-        { label: '5H LIMIT', used: 90, limit: 100 },
-        { label: 'daily', used: 0, limit: 50 },
+        { window: { duration: 5, unit: 'hour' }, used: 90, limit: 100 },
+        { name: 'daily', used: 0, limit: 50 },
       ],
     };
     const view = buildManagedUsageFooterView(usage, null);
     expect(view).toEqual({
       kind: 'ok',
       parts: [
-        { text: 'Weekly: 60%', severity: 'warn' },
-        { text: '5H: 90%', severity: 'danger' },
+        { text: '1w: 60%', severity: 'warn' },
+        { text: '5h: 90%', severity: 'danger' },
         { text: 'daily: 0%', severity: 'ok' },
       ],
     });
@@ -66,7 +66,7 @@ describe('buildManagedUsageFooterView', () => {
     const view = buildManagedUsageFooterView(
       {
         summary: null,
-        limits: [{ label: '5h limit', used: 10, limit: 0 }],
+        limits: [{ window: { duration: 5, unit: 'hour' }, used: 10, limit: 0 }],
       },
       null,
     );

@@ -215,8 +215,8 @@ describe('FooterComponent managed quota', () => {
       model: 'kimi-k2',
       availableModels: { 'kimi-k2': managedKimiModel },
       managedUsage: {
-        summary: { label: '1w limit', used: 12, limit: 100 },
-        limits: [{ label: '5h limit', used: 40, limit: 100 }],
+        summary: { window: { duration: 1, unit: 'week' }, used: 12, limit: 100 },
+        limits: [{ window: { duration: 5, unit: 'hour' }, used: 40, limit: 100 }],
       },
       managedUsageError: null,
     };
@@ -241,8 +241,8 @@ describe('FooterComponent managed quota', () => {
       },
       // Leftover cache from a previous managed model must not leak.
       managedUsage: {
-        summary: { label: '1w limit', used: 12, limit: 100 },
-        limits: [{ label: '5h limit', used: 40, limit: 100 }],
+        summary: { window: { duration: 1, unit: 'week' }, used: 12, limit: 100 },
+        limits: [{ window: { duration: 5, unit: 'hour' }, used: 40, limit: 100 }],
       },
     };
     const footer = new FooterComponent(state);
@@ -259,8 +259,8 @@ describe('FooterComponent managed quota', () => {
       model: 'kimi-k2',
       availableModels: { 'kimi-k2': managedKimiModel },
       managedUsage: {
-        summary: { label: '1w limit', used: 12, limit: 100 },
-        limits: [{ label: '5h limit', used: 40, limit: 100 }],
+        summary: { window: { duration: 1, unit: 'week' }, used: 12, limit: 100 },
+        limits: [{ window: { duration: 5, unit: 'hour' }, used: 40, limit: 100 }],
       },
     };
     const footer = new FooterComponent(state);

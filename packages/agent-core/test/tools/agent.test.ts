@@ -22,7 +22,7 @@ function context<Input>(args: Input, toolCallId = 'call_agent') {
 function mockSubagentHost<T extends Pick<SessionSubagentHost, 'spawn'> & Partial<SessionSubagentHost>>(
   host: T,
 ): T & SessionSubagentHost {
-  return { resume: vi.fn(), ...host } as unknown as T & SessionSubagentHost;
+  return { resume: vi.fn(), delegatableSubagents: vi.fn(() => ({})), ...host } as unknown as T & SessionSubagentHost;
 }
 
 function agentTool(
@@ -136,12 +136,30 @@ describe('AgentTool', () => {
     expect(tool.description).toContain('Default to a foreground subagent');
   });
 
-  it('does not expose a model parameter in the JSON schema', () => {
+  it('exposes a primary/secondary model parameter in the JSON schema', () => {
     const host = mockSubagentHost({ spawn: vi.fn() });
     const tool = agentTool(host);
-    const properties = (tool.parameters as { properties: Record<string, unknown> }).properties;
+    const properties = (
+      tool.parameters as {
+        properties: Record<string, { description?: string; enum?: string[] }>;
+      }
+    ).properties;
 
-    expect(properties).not.toHaveProperty('model');
+    expect(properties['model']?.enum).toEqual(['primary', 'secondary']);
+    expect(properties['model']?.description).toContain('secondary');
+  });
+
+  it('appends the subagent model description only when provided', () => {
+    const host = mockSubagentHost({ spawn: vi.fn() });
+    const withoutModels = agentTool(host);
+    expect(withoutModels.description).not.toContain('Available models');
+
+    const withModels = agentTool(host, createBackgroundManager().manager, undefined, {
+      subagentModelDescription:
+        'Available models (pass via model):\n- secondary: cheap (default)\n- primary: flagship',
+    });
+    expect(withModels.description).toContain('Available models (pass via model):');
+    expect(withModels.description).toContain('secondary: cheap');
   });
 
   it('renders the tool set for each subagent type', () => {
@@ -278,6 +296,48 @@ describe('AgentTool', () => {
     );
   });
 
+  it('passes the model choice through to spawn, but not to resume', async () => {
+    const host = mockSubagentHost({
+      spawn: vi.fn().mockResolvedValue({
+        agentId: 'agent-child',
+        profileName: 'coder',
+        resumed: false,
+        completion: Promise.resolve({ result: 'child result' }),
+      }),
+      resume: vi.fn().mockResolvedValue({
+        agentId: 'agent-existing',
+        profileName: 'coder',
+        resumed: true,
+        completion: Promise.resolve({ result: 'resumed result' }),
+      }),
+    });
+    const tool = agentTool(host);
+
+    await executeTool(tool,
+      context({
+        prompt: 'Investigate',
+        description: 'Find cause',
+        model: 'primary',
+      }),
+    );
+    expect(host.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ modelChoice: 'primary' }),
+    );
+
+    await executeTool(tool,
+      context({
+        prompt: 'Continue',
+        description: 'Continue work',
+        resume: 'agent-existing',
+        model: 'secondary',
+      }),
+    );
+    expect(host.resume).toHaveBeenCalledWith(
+      'agent-existing',
+      expect.not.objectContaining({ modelChoice: expect.anything() }),
+    );
+  });
+
   it('resumes a foreground subagent when resume is provided', async () => {
     const host = mockSubagentHost({
       spawn: vi.fn(),
@@ -312,36 +372,6 @@ describe('AgentTool', () => {
     expect(result.output).toContain('agent_id: agent-existing');
     expect(result.output).toContain('actual_subagent_type: explore');
     expect(result.output).toContain('resumed result');
-  });
-
-  it('ignores model selection when resuming an existing agent', async () => {
-    const host = mockSubagentHost({
-      spawn: vi.fn(),
-      resume: vi.fn().mockResolvedValue({
-        agentId: 'agent-existing',
-        profileName: 'explore',
-        resumed: true,
-        completion: Promise.resolve({ result: 'resumed result' }),
-      }),
-    });
-    const tool = agentTool(host);
-
-    const result = await executeTool(
-      tool,
-      context({
-        prompt: 'Continue',
-        description: 'Continue work',
-        resume: 'agent-existing',
-        model: 'example/unavailable-model',
-      }),
-    );
-
-    expect(result.isError).toBeUndefined();
-    expect(host.spawn).not.toHaveBeenCalled();
-    expect(host.resume).toHaveBeenCalledWith(
-      'agent-existing',
-      expect.objectContaining({ modelAlias: undefined }),
-    );
   });
 
   it('returns an error when resuming with a subagent type', async () => {

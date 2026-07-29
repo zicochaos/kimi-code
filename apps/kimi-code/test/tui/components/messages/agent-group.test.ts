@@ -91,6 +91,26 @@ describe('AgentGroupComponent', () => {
     waiting.dispose();
   });
 
+  it('shows the bound model in the row stats once reported', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const ui = stubTui();
+    const group = new AgentGroupComponent(ui);
+    const running = createAgent('call_agent_1', 'inspect project', 'explore', ui);
+    startAgent(running, 'call_agent_1', 'explore');
+
+    group.attach('call_agent_1', running);
+    expect(renderText(group)).toContain('explore · inspect project · 0 tools');
+
+    running.updateSubagentMetrics({ modelDisplay: 'Kimi K2.5' });
+    // Non-phase updates are throttled; flush the pending refresh.
+    vi.runOnlyPendingTimers();
+    expect(renderText(group)).toContain('explore · inspect project · Kimi K2.5 · 0 tools');
+
+    group.dispose();
+    running.dispose();
+  });
+
   it('shows the Ctrl+B hint while agents are running and hides it once all are backgrounded', () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
@@ -215,7 +235,7 @@ describe('AgentGroupComponent', () => {
     group.attach('call_agent_1', explore);
 
     const out = renderText(group);
-    expect(out).toContain('explore · example/test-model · inspect project · 0 tools · 0s · Running');
+    expect(out).toContain('explore · inspect project · example/test-model · 0 tools · 0s · Running');
 
     group.dispose();
     explore.dispose();
