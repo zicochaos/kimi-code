@@ -349,12 +349,14 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
         );
       }
     };
+    await this.pluginsReady;
     const agentCatalog = new SessionAgentProfileCatalog({
       workDir,
       brandHomeDir: this.homeDir,
       osHomeDir: this.userHomeDir,
       extraDirs: config.extraAgentDirs,
       explicitFiles: options.agentFiles,
+      pluginRoots: this.plugins.pluginAgentRoots(),
       warn: (message, error) => {
         agentCatalogWarnings.push({ message, error });
       },
@@ -501,6 +503,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       kaos?: Kaos;
       persistenceKaos?: Kaos;
       forcePluginSessionStartReminder?: boolean;
+      refreshPluginAgents?: boolean;
     },
   ): Promise<ResumeSessionResult> {
     const summary = await this.sessionStore.get(input.sessionId);
@@ -570,6 +573,9 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       agents: {
         userHomeDir: this.userHomeDir,
         extraDirs: config.extraAgentDirs,
+        pluginRoots:
+          overrides.refreshPluginAgents === true ? this.plugins.pluginAgentRoots() : undefined,
+        refreshPluginAgents: overrides.refreshPluginAgents,
       },
       mcpConfig,
       experimentalFlags: this.experimentalFlags,
@@ -588,6 +594,9 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       warning = resumeResult.warning;
       await session.assertMainProfileSelection(input.agentProfile);
       await this.refreshSessionRuntimeConfig(session, config);
+      if (overrides.refreshPluginAgents === true) {
+        await session.writeMetadata();
+      }
     } catch (error) {
       await session.close().catch(() => {});
       withTelemetryContext(this.telemetry, { sessionId: summary.id }).track('session_load_failed', {
@@ -631,7 +640,10 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     }
     return this.resumeSessionWithOverrides(
       { sessionId: summary.id },
-      { forcePluginSessionStartReminder: input.forcePluginSessionStartReminder },
+      {
+        forcePluginSessionStartReminder: input.forcePluginSessionStartReminder,
+        refreshPluginAgents: true,
+      },
     );
   }
 
