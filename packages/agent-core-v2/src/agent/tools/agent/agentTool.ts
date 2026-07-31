@@ -1,5 +1,5 @@
 /**
- * `tools` domain (L7) — `SubagentTool` implementation (the `Agent` tool).
+ * `tools` domain — `SubagentTool` implementation (the `Agent` tool).
  *
  * The LLM-facing wrapper over the `subagent` domain: translates the tool args
  * into a Profile + Model binding, creates (or resumes) an agent through
@@ -8,19 +8,15 @@
  * (`mirrorAgentRun`). The tool also owns the JSON schema + description,
  * approval rule, background-task registration (so the LLM can see the run
  * under TaskList/TaskOutput/TaskStop when `run_in_background=true` or after
- * detach), and terminal text formatting. The public contract (schemas,
- * constants, `ISubagentTool`) lives in `./agent`.
+ * detach), and terminal text formatting.
  *
  * Spawn bindings use an explicit tool choice first, then the target profile's
  * symbolic model preference, before `resolveSubagentBinding` falls back to the
- * configured secondary model or the caller's model. When the experimental
- * `subagent-model-selection` flag is on, the `model` parameter also accepts an
- * exact configured alias from the safe directory (thinking resolves naturally
- * for that alias). The selected alias is resolved through the model catalog
- * before lifecycle allocation. A resumed agent keeps the model recorded in its
- * own wire journal — with per-subagent models there is no "child follows the
- * parent's current model" invariant to enforce, and the model parameter is
- * ignored on resume.
+ * configured secondary model or the caller's model. The selected alias is
+ * resolved through the model catalog before lifecycle allocation. A resumed
+ * agent keeps the model recorded in its own wire journal — with per-subagent
+ * models there is no "child follows the parent's current model" invariant to
+ * enforce.
  *
  * Registered via the module-level `registerAgentToolService(ISubagentTool,
  * SubagentTool)` at the bottom of this file — the same "import = register"
@@ -99,6 +95,7 @@ import {
   formatSubagentTimeoutDescription,
   resolveSubagentBinding,
   resolveSubagentTimeoutMs,
+  stripSubagentModelParameter,
   wrapSubagentModelError,
   type SubagentModelChoice,
 } from '#/session/subagent/configSection';
@@ -120,20 +117,34 @@ import AGENT_BACKGROUND_DISABLED_DESCRIPTION from './agent-background-disabled.m
 import AGENT_BACKGROUND_DESCRIPTION from './agent-background-enabled.md?raw';
 import AGENT_DESCRIPTION_BASE from './agent.md?raw';
 
+const SUBAGENT_TOOL_PARAMETERS = toInputJsonSchema(SubagentToolInputSchema);
+const SUBAGENT_TOOL_PARAMETERS_NO_MODEL = stripSubagentModelParameter(SUBAGENT_TOOL_PARAMETERS);
+
 export class SubagentTool implements ISubagentTool {
   declare readonly _serviceBrand: undefined;
   readonly name: string = 'Agent';
 
-  private readonly baseParameters: Record<string, unknown> = toInputJsonSchema(SubagentToolInputSchema);
-  private readonly callerAgentId: string;
-  private readonly canRunInBackground: () => boolean;
-
+  /**
+   * The `model` choice only exists while secondary-model or exact model
+   * selection is enabled; otherwise the advertised schema drops it so the
+   * concept never enters the prompt. Read live per request (same as
+   * `description`).
+   */
   get parameters(): Record<string, unknown> {
+    if (
+      !this.flags.enabled(SECONDARY_MODEL_FLAG_ID) &&
+      !this.flags.enabled(SUBAGENT_MODEL_SELECTION_FLAG_ID)
+    ) {
+      return SUBAGENT_TOOL_PARAMETERS_NO_MODEL;
+    }
     return parametersWithSubagentModelSelection(
-      this.baseParameters,
+      SUBAGENT_TOOL_PARAMETERS,
       this.exactModelSelectionEnabled(),
     );
   }
+
+  private readonly callerAgentId: string;
+  private readonly canRunInBackground: () => boolean;
 
   constructor(
     @IAgentLifecycleService private readonly lifecycle: IAgentLifecycleService,
@@ -212,18 +223,20 @@ export class SubagentTool implements ISubagentTool {
   async resolveExecution(args: SubagentToolInput): Promise<ToolExecution> {
     const requestedProfileName = args.subagent_type?.length ? args.subagent_type : undefined;
     const resumeAgentId = args.resume?.trim();
-    const isResume = resumeAgentId !== undefined && resumeAgentId.length > 0;
 
-    if (isResume && requestedProfileName !== undefined) {
+    if (
+      resumeAgentId !== undefined &&
+      resumeAgentId.length > 0 &&
+      requestedProfileName !== undefined
+    ) {
       return { output: RESUME_WITH_TYPE_UNAVAILABLE, isError: true };
     }
 
+    const isResume = resumeAgentId !== undefined && resumeAgentId.length > 0;
     let displayModel: string | undefined;
     if (!isResume && args.model !== undefined) {
       const preflight = this.preflightRequestedModel(args.model);
-      if (preflight.error !== undefined) {
-        return { output: preflight.error, isError: true };
-      }
+      if (preflight.error !== undefined) return { output: preflight.error, isError: true };
       displayModel = preflight.displayModel;
     }
 
@@ -262,9 +275,7 @@ export class SubagentTool implements ISubagentTool {
   private preflightRequestedModel(
     requested: string,
   ): { readonly displayModel?: string; readonly error?: string } {
-    if (isSubagentModelChoiceToken(requested)) {
-      return { displayModel: requested };
-    }
+    if (isSubagentModelChoiceToken(requested)) return { displayModel: requested };
     if (!this.exactModelSelectionEnabled()) {
       return {
         error:
@@ -295,7 +306,6 @@ export class SubagentTool implements ISubagentTool {
     profilePreference: SubagentModelChoice | undefined,
   ): { model: string; thinking?: string } {
     if (requested !== undefined && !isSubagentModelChoiceToken(requested)) {
-      // Exact alias: thinking resolves naturally (global → model default).
       return { model: requested };
     }
     return resolveSubagentBinding(
@@ -335,7 +345,6 @@ export class SubagentTool implements ISubagentTool {
         throw new Error(`Agent instance "${resumeAgentId}" does not exist`);
       }
       await this.ensureOwnedIdleSubagent(resumeAgentId, target);
-      // Resume keeps the child's bound model; surface that alias.
       effectiveModelAlias = target.accessor.get(IAgentProfileService).data().modelAlias;
       agentId = target.id;
       profileName =
@@ -377,7 +386,6 @@ export class SubagentTool implements ISubagentTool {
             profile: profile.name,
             model: binding.model,
             thinking: binding.thinking,
-            cwd: own.cwd,
           },
           labels: subagentLabels(this.callerAgentId),
         });

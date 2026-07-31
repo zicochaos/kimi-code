@@ -18,9 +18,9 @@
  * and the main agent's `IAgentSkillService` (activate). A session created through
  * `POST /sessions` is already activated (live), so listing/activation work
  * immediately; the "not activated" branch is exercised by archiving the session
- * (it stays in the index but leaves the live map). Workspace skills are scanned
- * session-less from the workspace root via the edge composition in
- * `routes/skills.ts`, which must match the session listing for the same cwd.
+ * (it stays in the index but leaves the live map). Workspace skills come from
+ * the handler's shared Workspace catalog, which must match the Session view for
+ * the same cwd.
  */
 
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -29,8 +29,7 @@ import { join } from 'node:path';
 
 import {
   IAgentLifecycleService,
-  ISessionLifecycleService,
-  ISkillCatalogRuntimeOptions,
+  getLiveSessionById,
 } from '@moonshot-ai/agent-core-v2';
 import {
   activateSkillResultSchema,
@@ -110,7 +109,7 @@ describe('server-v2 /api/v1 skills', () => {
   // The main agent scope is not created automatically on session creation
   // (server-v2 gap G10); create it here so skill activation can start a turn.
   async function createMainAgent(sessionId: string): Promise<void> {
-    const session = server!.core.accessor.get(ISessionLifecycleService).get(sessionId);
+    const session = getLiveSessionById(server!.core.accessor, sessionId);
     if (session === undefined) throw new Error(`session ${sessionId} not found`);
     const agents = session.accessor.get(IAgentLifecycleService);
     if (agents.get('main') === undefined) await agents.create({ agentId: 'main' });
@@ -370,7 +369,7 @@ describe('server-v2 /api/v1 skills', () => {
         port: 0,
         homeDir: home,
         logLevel: 'silent',
-        seeds: [[ISkillCatalogRuntimeOptions, { _serviceBrand: undefined, explicitDirs: [explicitDir] }]] as never,
+        skillDirs: [explicitDir],
       });
       base = `http://127.0.0.1:${server.port}`;
 
