@@ -2,17 +2,16 @@
 
 This file tracks **what diverges from upstream** (`MoonshotAI/kimi-code`) so rebases do not drop local product behavior. Update it whenever a fork-only feature is added, restored, or abandoned.
 
-**Upstream base we track:** `@moonshot-ai/kimi-code@0.29.2` / `main@origin` `77618e38c35a81e26134b3f83eb7f2b460c0ee05`  
+**Upstream base we track:** `@moonshot-ai/kimi-code@0.31.1` / `main@origin` `bfa00807c975bb146630651997924d185c9f6f76`  
 **Local main tip:** see `jj log -r main`  
-**Backup before this safe port:** bookmark `backup/pre-0.29.2-port` at `b01dc627cad94603a0246339ec527504690f7968`
 
 ## How to rebase without losing options
 
 1. `jj git fetch --all-remotes`
 2. Backup: `jj bookmark create backup/pre-<ver> -r main`
-3. **Do not** rebase the whole local history onto origin (merge-PR baggage).
-4. Start from `main@origin` and duplicate only the feature commits listed below.
-5. Resolve docs conflicts carefully, especially mirrored EN/ZH pages.
+3. Create an isolated workspace and merge `main@fork` with `main@origin`; do not rebase the merge-heavy fork history.
+4. Prefer upstream implementations where they provide the same or better behavior, then restore only the missing contracts listed below.
+5. Resolve docs conflicts carefully, especially mirrored EN/ZH pages, and update this file's upstream base.
 6. Update this file if the set of options changes.
 7. Push the fork only after explicit approval: `jj git push --remote fork -b main`.
 
@@ -29,8 +28,8 @@ rg -n "disabled_skills|persist_default_model|agents_md_expand_includes|formatTer
 
 | Option | Default | Purpose | Key code |
 | --- | --- | --- | --- |
-| `disabled_skills` | `[]` | Hide skill names from listing, the `Skill` tool, and slash menus; files stay on disk for shared `~/.agents/skills`. Listing waits for async source reloads (`awaitPendingReloads`) | agent-core and agent-core-v2 skill catalogs; kap-server workspace list and activation error mapping |
-| `persist_default_model` | `true` | When `false`, model changes stay session-only and do not rewrite managed `config.toml` model settings | `packages/agent-core/src/config/persist-default-model.ts`, `packages/agent-core-v2/src/app/kosongConfig/configSection.ts`, `packages/agent-core-v2/src/app/kosongConfig/kosongConfigService.ts` |
+| `disabled_skills` | `[]` | Hide skill names from listing, the `Skill` tool, and slash menus; files stay on disk for shared `~/.agents/skills`. Listing waits for async source reloads (`awaitPendingReloads`) | agent-core catalog; agent-core-v2 Workspace catalog and Session overlay; kap-server workspace list and activation error mapping |
+| `persist_default_model` | `true` | When `false`, model changes stay process-local and do not rewrite managed `config.toml` model settings | `packages/agent-core/src/config/persist-default-model.ts`, `packages/agent-core-v2/src/app/kosongConfig/configSection.ts`, `packages/agent-core-v2/src/app/kosongConfig/kosongConfigService.ts` |
 | `agents_md_expand_includes` | `false` | When `true`, standalone `@path` lines in `AGENTS.md` are expanded at system-prompt assembly time (depth ≤ 5; missing/cycle/empty → HTML comments) | agent-core and agent-core-v2 profile context loaders; v2 `agentsMdExpandIncludes` config section |
 
 ### Experimental
@@ -71,7 +70,7 @@ There is intentionally no fork-only `/api/v1/usages` route. The quota UI must co
 | Item | URL | Status |
 | --- | --- | --- |
 | Issue: `disabled_skills` | https://github.com/MoonshotAI/kimi-code/issues/1982 | tracked upstream |
-| PR: `disabled_skills` | https://github.com/MoonshotAI/kimi-code/pull/1983 | tracked upstream (head `95b77e4c`); local port includes kap-server behavior |
+| PR: `disabled_skills` | https://github.com/MoonshotAI/kimi-code/pull/1983 | open upstream (head `af63f9a3`); local port includes kap-server behavior |
 | `subagent-model-selection` | https://github.com/MoonshotAI/kimi-code/pull/1841 | carried locally on top of upstream secondary-model |
 | Plan quota footer/sidebar | https://github.com/MoonshotAI/kimi-code/pull/1827 | UI behavior carried locally; backend uses current upstream OAuth route |
 | `agents_md_expand_includes` | — | fork-only; security/design review needed before upstreaming |
@@ -118,7 +117,7 @@ If something disappears after syncing origin, compare against `backup/pre-*` and
 | Bookmark | Meaning |
 | --- | --- |
 | `main` | Shipping fork tip |
-| `main@origin` | Upstream tip (`77618e38…`, post-0.29.2) |
+| `main@origin` | Upstream tip (`bfa00807…`, version 0.31.1) |
 | `backup/pre-0.29.2-port` | Pre-port local tip at `b01dc627cad94603a0246339ec527504690f7968` |
 | `backup/pre-0.29.1` | Older pre-0.29.1 local tip at `117f60d4816926a68e7d584f5d6f04e9dcd66411` |
 | `feat/disabled-skills` | Branch for upstream PR #1983; keep untouched during fork ports |

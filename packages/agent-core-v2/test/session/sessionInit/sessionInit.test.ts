@@ -13,10 +13,12 @@ import { IHostFileSystem, type HostFileStat } from '#/os/interface/hostFileSyste
 import { IAgentContextSizeService } from '#/agent/contextSize/contextSize';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
 import { IAgentProfileService } from '#/agent/profile/profile';
+import { AGENTS_MD_EXPAND_INCLUDES_SECTION } from '#/agent/profile/configSection';
 import { IAgentSystemReminderService } from '#/agent/systemReminder/systemReminder';
 import { IWireService } from '#/wire/wire';
 import { ErrorCodes, Error2 } from '#/errors';
 import { IAgentLifecycleService } from '#/session/agentLifecycle/agentLifecycle';
+import { ISessionContext } from '#/session/sessionContext/sessionContext';
 import { ISessionInitService } from '#/session/sessionInit/sessionInit';
 import { SessionInitService } from '#/session/sessionInit/sessionInitService';
 import { ISessionSubagentService } from '#/session/subagent/subagent';
@@ -25,6 +27,7 @@ const WORK_DIR = '/project';
 const AGENTS_MD = 'latest project instructions';
 const AGENTS_MD_PATH = `${WORK_DIR}/AGENTS.md`;
 const GIT_DIR_PATH = `${WORK_DIR}/.git`;
+const INCLUDED_PATH = `${WORK_DIR}/rule.md`;
 
 describe('SessionInitService', () => {
   let disposables: DisposableStore;
@@ -36,6 +39,8 @@ describe('SessionInitService', () => {
   let create: ReturnType<typeof vi.fn>;
   let run: ReturnType<typeof vi.fn>;
   let runCompletion: Promise<{ summary: string; usage?: undefined }>;
+  let expandIncludes: boolean;
+  let agentsMdContent: string;
 
   beforeEach(() => {
     disposables = new DisposableStore();
@@ -47,6 +52,8 @@ describe('SessionInitService', () => {
       events.push({ type: 'agent.status.updated', model: 'mock-model' });
     });
     runCompletion = Promise.resolve({ summary: 'Explored and wrote AGENTS.md', usage: undefined });
+    expandIncludes = false;
+    agentsMdContent = AGENTS_MD;
 
     const handles: Record<string, { id: string; accessor: { get: (id: unknown) => unknown } }> = {};
     const lifecycle = {
@@ -69,7 +76,7 @@ describe('SessionInitService', () => {
     const eventBus = { publish: vi.fn((event: unknown) => events.push(event)) };
     const telemetry = { track: vi.fn(), track2: vi.fn() };
     const profile = {
-      data: () => ({ modelAlias: 'mock-model', thinkingLevel: 'off', cwd: WORK_DIR }),
+      data: () => ({ modelAlias: 'mock-model', thinkingLevel: 'off' }),
     };
     const permissionMode = { mode: 'auto', setMode: vi.fn() };
 
@@ -106,26 +113,35 @@ describe('SessionInitService', () => {
       _serviceBrand: undefined,
       stat: vi.fn(async (path: string): Promise<HostFileStat> => {
         if (path === GIT_DIR_PATH) return { isFile: false, isDirectory: true, size: 0 };
-        if (path === AGENTS_MD_PATH)
+        if (path === AGENTS_MD_PATH || path === INCLUDED_PATH)
           return { isFile: true, isDirectory: false, size: AGENTS_MD.length };
         throw new Error(`ENOENT: ${path}`);
       }),
       readText: vi.fn(async (path: string) => {
-        if (path === AGENTS_MD_PATH) return AGENTS_MD;
+        if (path === AGENTS_MD_PATH) return agentsMdContent;
+        if (path === INCLUDED_PATH) return 'included rule';
         throw new Error(`ENOENT: ${path}`);
       }),
+      realpath: vi.fn(async (path: string) => path),
     } as unknown as IHostFileSystem);
     ix.stub(IHostEnvironment, {
       _serviceBrand: undefined,
       homeDir: '/home',
+      pathClass: 'posix',
     } as unknown as IHostEnvironment);
     ix.stub(IBootstrapService, {
       _serviceBrand: undefined,
       homeDir: '/home/brand',
     } as unknown as IBootstrapService);
+    ix.stub(ISessionContext, {
+      _serviceBrand: undefined,
+      cwd: WORK_DIR,
+    } as unknown as ISessionContext);
     ix.stub(IConfigService, {
       _serviceBrand: undefined,
-      get: vi.fn(() => false),
+      get: vi.fn((domain: string) =>
+        domain === AGENTS_MD_EXPAND_INCLUDES_SECTION ? expandIncludes : undefined,
+      ),
     } as unknown as IConfigService);
     ix.set(ISessionInitService, new SyncDescriptor(SessionInitService));
   });
@@ -138,7 +154,7 @@ describe('SessionInitService', () => {
 
     expect(create).toHaveBeenCalledTimes(1);
     expect(create.mock.calls[0]![0]).toMatchObject({
-      binding: { profile: 'coder', model: 'mock-model', thinking: 'off', cwd: WORK_DIR },
+      binding: { profile: 'coder', model: 'mock-model', thinking: 'off' },
     });
 
     expect(run).toHaveBeenCalledTimes(1);
@@ -172,6 +188,17 @@ describe('SessionInitService', () => {
     expect(events).toContainEqual(
       expect.objectContaining({ type: 'subagent.completed', subagentId: 'agent-0' }),
     );
+  });
+
+  it('expands AGENTS.md includes in the completion reminder when enabled', async () => {
+    expandIncludes = true;
+    agentsMdContent = '@rule.md';
+
+    await ix.get(ISessionInitService).generateAgentsMd();
+
+    const [reminder] = appendSystemReminder.mock.calls[0] as [string];
+    expect(reminder).toContain('included rule');
+    expect(reminder).not.toContain('@rule.md');
   });
 
   it('wraps a subagent failure in SESSION_INIT_FAILED', async () => {

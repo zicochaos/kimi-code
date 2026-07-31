@@ -1,5 +1,5 @@
 /**
- * `tools` domain (L7) — `AgentSwarmTool` implementation (the `AgentSwarm`
+ * `tools` domain — `AgentSwarmTool` implementation (the `AgentSwarm`
  * tool).
  *
  * Launches a batch of child agents (an ordinary Agent scope each) through the
@@ -9,15 +9,11 @@
  * resumed subagents like v1. When the caller has a model bound, the tool
  * resolves the explicit or target-profile model preference up front via
  * `resolveSubagentBinding` (against `IConfigService`, `IFlagService`,
- * `ISessionAgentProfileCatalog`, and the caller's `IAgentProfileService`) — or
- * an exact configured alias when `subagent-model-selection` is enabled — and
+ * `ISessionAgentProfileCatalog`, and the caller's `IAgentProfileService`) and
  * threads it through the swarm tasks; otherwise binding is left to the
  * service, which keeps its own "no model bound" check and inherit-caller
- * fallback. Resumed subagents always keep their own model. Swarm mode is
- * entered through `IAgentSwarmService`; the caller's agent id comes from
- * `IAgentScopeContext`. Pure tool — owns no scoped state.
- * The public contract (input schema, constants, `IAgentSwarmTool`) lives in
- * `./agent-swarm`.
+ * fallback. Swarm mode is entered through `IAgentSwarmService`; the caller's
+ * agent id comes from `IAgentScopeContext`. Pure tool — owns no scoped state.
  *
  * Registered via the module-level `registerAgentToolService(IAgentSwarmTool,
  * AgentSwarmTool)` at the bottom of this file — the same "import = register"
@@ -60,8 +56,10 @@ import {
   buildSubagentModelDescriptions,
   resolveSubagentBinding,
   resolveSubagentTimeoutMs,
+  stripSubagentModelParameter,
   type SubagentModelChoice,
 } from '#/session/subagent/configSection';
+import { SECONDARY_MODEL_FLAG_ID } from '#/session/subagent/flag';
 import {
   AgentSwarmToolInputSchema,
   IAgentSwarmTool,
@@ -72,6 +70,9 @@ import {
 import AGENT_SWARM_DESCRIPTION from './agent-swarm.md?raw';
 
 const DEFAULT_SUBAGENT_TYPE = 'coder';
+
+const AGENT_SWARM_PARAMETERS = toInputJsonSchema(AgentSwarmToolInputSchema);
+const AGENT_SWARM_PARAMETERS_NO_MODEL = stripSubagentModelParameter(AGENT_SWARM_PARAMETERS);
 
 interface AgentSwarmSpawnSpec {
   readonly kind: 'spawn';
@@ -103,8 +104,25 @@ export class AgentSwarmTool implements IAgentSwarmTool {
   declare readonly _serviceBrand: undefined;
   readonly name = 'AgentSwarm' as const;
 
-  private readonly baseParameters: Record<string, unknown> =
-    toInputJsonSchema(AgentSwarmToolInputSchema);
+  /**
+   * The `model` choice only exists while secondary-model or exact model
+   * selection is enabled; otherwise the advertised schema drops it so the
+   * concept never enters the prompt. Read live per request (same as
+   * `description`).
+   */
+  get parameters(): Record<string, unknown> {
+    if (
+      !this.flags.enabled(SECONDARY_MODEL_FLAG_ID) &&
+      !this.flags.enabled(SUBAGENT_MODEL_SELECTION_FLAG_ID)
+    ) {
+      return AGENT_SWARM_PARAMETERS_NO_MODEL;
+    }
+    return parametersWithSubagentModelSelection(
+      AGENT_SWARM_PARAMETERS,
+      this.exactModelSelectionEnabled(),
+    );
+  }
+
   private readonly callerAgentId: string;
 
   constructor(
@@ -121,23 +139,14 @@ export class AgentSwarmTool implements IAgentSwarmTool {
     this.callerAgentId = scopeContext.agentId;
   }
 
-  get parameters(): Record<string, unknown> {
-    return parametersWithSubagentModelSelection(
-      this.baseParameters,
-      this.exactModelSelectionEnabled(),
-    );
-  }
-
   get description(): string {
-    let description = AGENT_SWARM_DESCRIPTION;
     const modelLines = buildSubagentModelDescriptions(
       this.config,
       this.flags,
       this.profile.data().modelAlias,
     );
-    if (modelLines !== undefined) {
-      description += `\n\n${modelLines}`;
-    }
+    let description = AGENT_SWARM_DESCRIPTION;
+    if (modelLines !== undefined) description += `\n\n${modelLines}`;
     if (this.exactModelSelectionEnabled()) {
       description += `\n\n${formatSubagentModelDirectory(this.modelDirectory())}`;
     }
@@ -149,9 +158,7 @@ export class AgentSwarmTool implements IAgentSwarmTool {
     let displayModel: string | undefined;
     if (itemCount > 0 && args.model !== undefined) {
       const preflight = this.preflightRequestedModel(args.model);
-      if (preflight.error !== undefined) {
-        return { output: preflight.error, isError: true };
-      }
+      if (preflight.error !== undefined) return { output: preflight.error, isError: true };
       displayModel = preflight.displayModel;
     }
     const agentCount = itemCount + Object.keys(args.resume_agent_ids ?? {}).length;
@@ -184,9 +191,7 @@ export class AgentSwarmTool implements IAgentSwarmTool {
   private preflightRequestedModel(
     requested: string,
   ): { readonly displayModel?: string; readonly error?: string } {
-    if (isSubagentModelChoiceToken(requested)) {
-      return { displayModel: requested };
-    }
+    if (isSubagentModelChoiceToken(requested)) return { displayModel: requested };
     if (!this.exactModelSelectionEnabled()) {
       return {
         error:
@@ -253,16 +258,16 @@ export class AgentSwarmTool implements IAgentSwarmTool {
             throw new Error(preflight.error.replace(/^subagent error: /, ''));
           }
         }
-        if (args.model !== undefined && !isSubagentModelChoiceToken(args.model)) {
-          binding = { model: args.model };
-        } else {
-          binding = resolveSubagentBinding(
-            this.config,
-            this.flags,
-            { modelAlias: own.modelAlias, thinkingLevel: own.thinkingLevel },
-            (args.model as SubagentModelChoice | undefined) ?? targetProfile.modelPreference,
-          );
-        }
+        binding =
+          args.model !== undefined && !isSubagentModelChoiceToken(args.model)
+            ? { model: args.model }
+            : resolveSubagentBinding(
+                this.config,
+                this.flags,
+                { modelAlias: own.modelAlias, thinkingLevel: own.thinkingLevel },
+                (args.model as SubagentModelChoice | undefined) ??
+                  targetProfile.modelPreference,
+              );
       }
     }
     const timeoutMs = resolveSubagentTimeoutMs(this.config);

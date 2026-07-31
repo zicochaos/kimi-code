@@ -1,5 +1,5 @@
 /**
- * `skillCatalog` domain (L3) — skill config sections.
+ * `skillCatalog` domain — skill config sections.
  *
  * Registers the v1-compatible top-level config domains `extraSkillDirs`,
  * `mergeAllAvailableSkills`, and `disabledSkills`. Values stay camelCase in

@@ -13,19 +13,15 @@
  * `/sessions/{session_id}` rather than as a global collection like `/tools`.
  *
  * The workspace list (`/workspaces/{workspace_id}/skills`) is the session-less
- * counterpart: it scans the same roots a new session in that workspace cwd
- * would, so clients can populate the composer skill menu before a session
- * exists. The workspace id is resolved to its root via
- * `IWorkspaceService.get` (`40410` when unknown); the root is then scanned by
- * composing the same five sources the per-session catalog merges — builtin /
- * user / extra / project(workDir) / plugin — through the shared `ISkillDiscovery`,
- * `skillRoots` and `InMemorySkillCatalog` primitives, so the result matches the
- * session listing for the same cwd. The composition is intentionally edge-side:
- * `InMemorySkillCatalog` is not a scoped service and the `skillRoots` helpers
- * are exported for exactly this purpose.
+ * counterpart, so clients can populate the composer skill menu before a
+ * session exists. The workspace id is resolved to its root via
+ * `IWorkspaceService.get` (`40410` when unknown), then the shared Workspace
+ * handler supplies `IWorkspaceSkillCatalog`. This keeps the endpoint and every
+ * Session under that handler on the same discovery, cache, and watcher state.
  *
  * **Activation gate**: by convention the session endpoints are only valid for
- * an *activated* session — one that is live in `ISessionLifecycleService`. When
+ * an *activated* session — one that is live in a workspace handler's session
+ * registry. When
  * the session is not in the live map we still answer `40401 session.not_found`
  * (the only session error code on the v1 wire contract), but we enrich the
  * message:
@@ -35,8 +31,8 @@
  * **Scope split**: v1 resolves a single `ISkillService` for every verb. v2
  * splits the domain, so the route borrows different scoped services per verb:
  *   - session list → `ISessionSkillCatalog` (Session scope) — `catalog.listSkills()`.
- *   - workspace list → no session: resolves `IWorkspaceService` (App scope)
- *     for the root, then composes the skill scan at the edge (see above).
+ *   - workspace list → `IWorkspaceSkillCatalog` (Workspace scope), materialized
+ *     on demand through `IWorkspaceLifecycleService`.
  *   - activate     → `IAgentSkillService` (Agent scope, on the `main` agent) —
  *                    renders the skill prompt and starts a turn with a
  *                    `skill_activation` origin. The returned `Turn` handle is
@@ -69,37 +65,21 @@
  */
 
 import {
-  BUILTIN_SKILLS,
-  DISABLED_SKILLS_SECTION,
   ErrorCodes,
-  EXTRA_SKILL_DIRS_SECTION,
   IAgentSkillService,
-  IBootstrapService,
-  IConfigService,
   IEventService,
-  IPluginService,
   ISessionIndex,
-  ISessionLifecycleService,
   ISessionMetadata,
   ISessionSkillCatalog,
-  ISkillCatalogRuntimeOptions,
-  ISkillDiscovery,
+  IWorkspaceLifecycleService,
   IWorkspaceService,
-  InMemorySkillCatalog,
+  IWorkspaceSkillCatalog,
   isError2,
-  MERGE_ALL_AVAILABLE_SKILLS_SECTION,
-  SKILL_SOURCE_PRIORITY,
+  resumeSessionById,
   applyPromptMetadataUpdate,
-  configuredRoots,
-  projectRoots,
   promptMetadataTextFromSkill,
-  userRoots,
-  type DisabledSkillsConfig,
   type ISessionScopeHandle,
   type Scope,
-  type SkillDefinition,
-  type ExtraSkillDirsConfig,
-  type MergeAllAvailableSkillsConfig,
 } from '@moonshot-ai/agent-core-v2';
 import { z } from 'zod';
 
@@ -163,7 +143,7 @@ async function resolveActivatedSession(
   // session cold-loads it instead of reporting "not activated"; matches v1's
   // `resumeSession` in SkillService. `resume` returns undefined only when the
   // session is unknown or its workspace is gone.
-  const handle = await core.accessor.get(ISessionLifecycleService).resume(sessionId);
+  const handle = await resumeSessionById(core.accessor, sessionId);
   if (handle !== undefined) return { handle };
 
   const summary = await core.accessor.get(ISessionIndex).get(sessionId);
@@ -235,7 +215,12 @@ export function registerSkillsRoutes(app: SkillsRouteHost, core: Scope): void {
         );
         return;
       }
-      const skills = (await listWorkspaceSkillsForRoot(core, ws.root)).map(toProtocolSkill);
+      const handler = await core
+        .accessor.get(IWorkspaceLifecycleService)
+        .handlerFor({ workspaceId: ws.id, root: ws.root });
+      const catalog = handler.accessor.get(IWorkspaceSkillCatalog);
+      await catalog.awaitPendingReloads();
+      const skills = catalog.catalog.listSkills().map(toProtocolSkill);
       reply.send(okEnvelope({ skills }, req.id));
     },
   );
@@ -315,75 +300,6 @@ export function registerSkillsRoutes(app: SkillsRouteHost, core: Scope): void {
     activateSkillRoute.options,
     activateSkillRoute.handler as Parameters<SkillsRouteHost['post']>[2],
   );
-}
-
-// ---------------------------------------------------------------------------
-// Workspace skill scan — session-less composition of the four skill sources
-// (see header). Mirrors `SessionSkillCatalogService`'s ordered merge so the
-// listing matches a session created in the same cwd.
-// ---------------------------------------------------------------------------
-
-/**
- * Scan the skills a new session rooted at `workDir` would see, without creating
- * a session. Resolves the same five sources the per-session catalog merges —
- * builtin / user / extra / project(`workDir`) / plugin — through the shared
- * `ISkillDiscovery` and `skillRoots` primitives, then folds them into an
- * `InMemorySkillCatalog` by the documented source priorities (lower priority
- * first; `replace: true` lets higher-priority sources win name collisions). The
- * priority numbers come from `SKILL_SOURCE_PRIORITY`; the resulting name set is
- * priority-invariant, but matching them keeps descriptor resolution identical to
- * the session catalog.
- */
-async function listWorkspaceSkillsForRoot(
-  core: Scope,
-  workDir: string,
-): Promise<readonly SkillDefinition[]> {
-  const discovery = core.accessor.get(ISkillDiscovery);
-  const bootstrap = core.accessor.get(IBootstrapService);
-  const plugins = core.accessor.get(IPluginService);
-  const config = core.accessor.get(IConfigService);
-  await config.ready;
-  const runtimeOptions = core.accessor.get(ISkillCatalogRuntimeOptions);
-  const extraSkillDirs = config.get<ExtraSkillDirsConfig>(EXTRA_SKILL_DIRS_SECTION) ?? [];
-  const disabledSkills = config.get<DisabledSkillsConfig>(DISABLED_SKILLS_SECTION) ?? [];
-  const mergeAllAvailableSkills =
-    config.get<MergeAllAvailableSkillsConfig>(MERGE_ALL_AVAILABLE_SKILLS_SECTION) ?? true;
-  const explicitDirs = runtimeOptions.explicitDirs ?? [];
-  const useExplicitDirs = explicitDirs.length > 0;
-  const rootOptions = { mergeAllAvailableSkills };
-
-  const [userRootList, projectRootList, explicitRootList, extraRootList, pluginRootList] = await Promise.all([
-    useExplicitDirs ? Promise.resolve([]) : userRoots(bootstrap.homeDir, bootstrap.osHomeDir, rootOptions),
-    useExplicitDirs ? Promise.resolve([]) : projectRoots(workDir, rootOptions),
-    useExplicitDirs
-      ? configuredRoots(explicitDirs, workDir, bootstrap.osHomeDir, 'user')
-      : Promise.resolve([]),
-    configuredRoots(extraSkillDirs, workDir, bootstrap.osHomeDir, 'extra'),
-    plugins.pluginSkillRoots(),
-  ]);
-  const [user, project, explicit, extra, plugin] = await Promise.all([
-    discovery.discover(userRootList),
-    discovery.discover(projectRootList),
-    discovery.discover(explicitRootList),
-    discovery.discover(extraRootList),
-    discovery.discover(pluginRootList),
-  ]);
-
-  // Match the session catalog: honor top-level `disabled_skills` so workspace
-  // previews (e.g. web onboarding slash menu) do not surface denylisted names.
-  const catalog = new InMemorySkillCatalog({ disabledSkills });
-  const ordered = [
-    { skills: BUILTIN_SKILLS, priority: SKILL_SOURCE_PRIORITY.builtin },
-    { skills: plugin.skills, priority: SKILL_SOURCE_PRIORITY.plugin },
-    { skills: extra.skills, priority: SKILL_SOURCE_PRIORITY.extra },
-    { skills: user.skills, priority: SKILL_SOURCE_PRIORITY.user },
-    { skills: explicit.skills, priority: SKILL_SOURCE_PRIORITY.user },
-    { skills: project.skills, priority: SKILL_SOURCE_PRIORITY.workspace },
-  ].toSorted((a, b) => a.priority - b.priority);
-  for (const { skills } of ordered) {
-    for (const skill of skills) catalog.register(skill, { replace: true });
-  }
-  return catalog.listSkills();
 }
 
 // ---------------------------------------------------------------------------

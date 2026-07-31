@@ -1,25 +1,28 @@
 /**
- * `profile` domain (L4) — system-prompt context assembly.
+ * `profile` domain — system-prompt context assembly.
  *
  * Loads the AGENTS.md instruction hierarchy (user-level brand + generic files,
- * then project-level files from the project root down to the cwd) and assembles
- * the {@link SystemPromptContext} bag consumed by `IAgentProfileService.useProfile`.
+ * then project-level files from the project root down to the cwd — the root
+ * discovered through a git work-tree probe) and assembles
+ * the {@link SystemPromptContext} bag.
+ * `agentsMdWatchRoots` exposes the watch plan for the probed file set, and
+ * `prepareSystemPromptContext` accepts a `preloadedAgentsMd` snapshot so the
+ * caller can inject an already-read snapshot instead of re-reading the files.
  *
  * Runs on top of the os `IHostFileSystem` (for `readText` / `stat` / `readdir`)
  * plus the host's `homeDir` — supplied together as a small `ProfileContextDeps`
  * bag threaded through the helpers.
  *
- * Port of v1 `packages/agent-core/src/profile/context.ts`. The combined
- * AGENTS.md content is injected in full; when it exceeds the soft
- * {@link AGENTS_MD_RECOMMENDED_MAX_BYTES} budget a visible `agentsMdWarning`
- * is produced (surfaced through `getSessionWarnings`) instead of silently
- * truncating.
+ * The combined AGENTS.md content is injected in full; when it exceeds the
+ * soft {@link AGENTS_MD_RECOMMENDED_MAX_BYTES} budget a visible
+ * `agentsMdWarning` is produced instead of silently truncating.
  */
 
 import { posix, win32 } from 'node:path';
 
 import { dirname, isAbsolute, join, normalize } from 'pathe';
 
+import { findGitWorkTree } from '#/app/git/workTree';
 import type { PathClass } from '#/os/interface/hostEnvironment';
 import type { IHostFileSystem } from '#/os/interface/hostFileSystem';
 
@@ -38,6 +41,8 @@ interface ProfileContextDeps {
   readonly pathClass: PathClass;
 }
 
+export type { ProfileContextDeps };
+
 export interface PreparedSystemPromptContext extends SystemPromptContext {
   readonly cwdListing?: string;
   readonly agentsMd?: string;
@@ -47,11 +52,7 @@ export interface PreparedSystemPromptContext extends SystemPromptContext {
 
 export interface PrepareSystemPromptContextOptions {
   readonly additionalDirs?: readonly string[];
-  /**
-   * When true, expand `@path` include directives inside AGENTS.md files.
-   * Project-level targets stay confined to the project root after realpath;
-   * trusted user-level files may use absolute targets. Default / absent = false.
-   */
+  readonly preloadedAgentsMd?: LoadedAgentsMd;
   readonly expandIncludes?: boolean;
 }
 
@@ -62,10 +63,11 @@ export async function prepareSystemPromptContext(
   options?: PrepareSystemPromptContextOptions,
 ): Promise<PreparedSystemPromptContext> {
   const additionalDirs = dedupeDirs(options?.additionalDirs ?? []);
-  const expandIncludes = options?.expandIncludes === true;
   const [cwdListing, agentsMdResult, additionalDirsInfo] = await Promise.all([
     listDirectory(deps, workDir, { collapseHiddenDirs: true }),
-    loadAgentsMdForRoots(deps, brandHome, [workDir], expandIncludes),
+    options?.preloadedAgentsMd !== undefined
+      ? Promise.resolve(options.preloadedAgentsMd)
+      : loadAgentsMdForRoots(deps, brandHome, [workDir], options?.expandIncludes === true),
     loadAdditionalDirsInfo(deps, additionalDirs),
   ]);
   return {
@@ -96,7 +98,9 @@ interface LoadedAgentsMd {
   readonly warning: string | undefined;
 }
 
-async function loadAgentsMdForRoots(
+export type { LoadedAgentsMd };
+
+export async function loadAgentsMdForRoots(
   deps: ProfileContextDeps,
   brandHome: string | undefined,
   workDirs: readonly string[],
@@ -136,7 +140,7 @@ async function loadAgentsMdForRoots(
 
   for (const workDir of workDirs) {
     const rootWorkDir = normalize(workDir);
-    const projectRoot = await findProjectRoot(deps, rootWorkDir);
+    const projectRoot = (await findGitWorkTree(deps.fs, rootWorkDir))?.root ?? rootWorkDir;
     const dirs = dirsRootToLeaf(rootWorkDir, projectRoot);
 
     for (const dir of dirs) {
@@ -160,6 +164,39 @@ async function loadAgentsMdForRoots(
   return { content, warning };
 }
 
+export interface AgentsMdWatchRoot {
+  readonly root: string;
+  readonly candidates: readonly string[];
+}
+
+export async function agentsMdWatchRoots(
+  deps: ProfileContextDeps,
+  workDir: string,
+  brandHome?: string,
+): Promise<readonly AgentsMdWatchRoot[]> {
+  const realHome = deps.homeDir;
+  const brandDir = brandHome ?? join(realHome, '.kimi-code');
+  const plan: AgentsMdWatchRoot[] = [
+    { root: brandDir, candidates: [join(brandDir, 'AGENTS.md')] },
+    {
+      root: realHome,
+      candidates: [join(realHome, '.agents', 'AGENTS.md'), join(realHome, '.agents', 'agents.md')],
+    },
+  ];
+  const rootWorkDir = normalize(workDir);
+  const projectRoot = (await findGitWorkTree(deps.fs, rootWorkDir))?.root ?? rootWorkDir;
+  const projectCandidates: string[] = [];
+  for (const dir of dirsRootToLeaf(rootWorkDir, projectRoot)) {
+    projectCandidates.push(
+      join(dir, '.kimi-code', 'AGENTS.md'),
+      join(dir, 'AGENTS.md'),
+      join(dir, 'agents.md'),
+    );
+  }
+  plan.push({ root: projectRoot, candidates: projectCandidates });
+  return plan;
+}
+
 async function loadAdditionalDirsInfo(
   deps: ProfileContextDeps,
   additionalDirs: readonly string[],
@@ -171,18 +208,6 @@ async function loadAdditionalDirsInfo(
     }),
   );
   return sections.join('\n\n');
-}
-
-async function findProjectRoot(deps: ProfileContextDeps, workDir: string): Promise<string> {
-  const initial = normalize(workDir);
-  let current = initial;
-
-  while (true) {
-    if (await pathExists(deps, join(current, '.git'))) return current;
-    const parent = dirname(current);
-    if (parent === current) return initial;
-    current = parent;
-  }
 }
 
 function dirsRootToLeaf(workDir: string, projectRoot: string): string[] {
@@ -227,12 +252,6 @@ async function readAgentFile(
   return { path, content };
 }
 
-/**
- * Expand lines of the form `@path` (absolute or relative to the including
- * file) by inlining the target file contents. Nested includes are supported up
- * to {@link AGENTS_MD_INCLUDE_MAX_DEPTH}. Cycles and missing files become HTML
- * comments so the rest of the instruction file still loads.
- */
 export async function expandAgentsMdIncludes(
   deps: ProfileContextDeps,
   content: string,
@@ -245,10 +264,9 @@ export async function expandAgentsMdIncludes(
 
   const baseDir = dirname(sourcePath);
   const realProjectRoot = projectRoot === undefined ? undefined : await deps.fs.realpath(projectRoot);
-  const lines = content.split('\n');
   const out: string[] = [];
 
-  for (const line of lines) {
+  for (const line of content.split('\n')) {
     const match = AGENTS_MD_INCLUDE_LINE.exec(line);
     if (match === null) {
       out.push(line);
