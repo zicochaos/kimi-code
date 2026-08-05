@@ -988,6 +988,7 @@ function createResumeNoSideEffectKaos(
     chdir: async (next: string) => {
       cwd = next;
     },
+    realpath: () => fail('realpath'),
     stat: () => fail('stat'),
     iterdir: () => fail('iterdir'),
     glob: () => fail('glob'),
