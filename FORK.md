@@ -2,18 +2,18 @@
 
 This file tracks **what diverges from upstream** (`MoonshotAI/kimi-code`) so rebases do not drop local product behavior. Update it whenever a fork-only feature is added, restored, or abandoned.
 
-**Upstream base we track:** `@moonshot-ai/kimi-code@0.31.1` / `main@origin` `bfa00807c975bb146630651997924d185c9f6f76`  
-**Local main tip:** see `jj log -r main`  
+**Upstream base we track:** `@moonshot-ai/kimi-code@0.33.0` / tag `4e43d6fb5ddd2e774e2fd7a006906a5bd41715c2` (`git fetch upstream --tags`, remote `upstream` = `MoonshotAI/kimi-code`, `origin` = this fork)  
+**Local main tip:** see `git log main` (0.33.0 port lives on merge branch `merge/upstream-0.33.0` until integrated)
 
-## How to rebase without losing options
+## How to merge a new upstream without losing options
 
-1. `jj git fetch --all-remotes`
-2. Backup: `jj bookmark create backup/pre-<ver> -r main`
-3. Create an isolated workspace and merge `main@fork` with `main@origin`; do not rebase the merge-heavy fork history.
+1. `git fetch upstream --tags`
+2. Backup: `git branch backup/pre-<ver>-port main`
+3. Create a merge branch (`git checkout -b merge/upstream-<ver> main`) and merge the upstream tag; do not rebase the merge-heavy fork history.
 4. Prefer upstream implementations where they provide the same or better behavior, then restore only the missing contracts listed below.
 5. Resolve docs conflicts carefully, especially mirrored EN/ZH pages, and update this file's upstream base.
 6. Update this file if the set of options changes.
-7. Push the fork only after explicit approval: `jj git push --remote fork -b main`.
+7. Push the fork only after explicit approval.
 
 Useful checks after a port:
 
@@ -28,9 +28,15 @@ rg -n "disabled_skills|persist_default_model|agents_md_expand_includes|formatTer
 
 | Option | Default | Purpose | Key code |
 | --- | --- | --- | --- |
-| `disabled_skills` | `[]` | Hide skill names from listing, the `Skill` tool, and slash menus; files stay on disk for shared `~/.agents/skills`. Listing waits for async source reloads (`awaitPendingReloads`) | agent-core catalog; agent-core-v2 Workspace catalog and Session overlay; kap-server workspace list and activation error mapping |
-| `persist_default_model` | `true` | When `false`, model changes stay process-local and do not rewrite managed `config.toml` model settings | `packages/agent-core/src/config/persist-default-model.ts`, `packages/agent-core-v2/src/app/kosongConfig/configSection.ts`, `packages/agent-core-v2/src/app/kosongConfig/kosongConfigService.ts` |
-| `agents_md_expand_includes` | `false` | When `true`, standalone `@path` lines in `AGENTS.md` are expanded at system-prompt assembly time (depth ≤ 5; missing/cycle/empty → HTML comments) | agent-core and agent-core-v2 profile context loaders; v2 `agentsMdExpandIncludes` config section |
+| `disabled_skills` | `[]` | Hide skill names from listing, the `Skill` tool, and slash menus; files stay on disk for shared `~/.agents/skills`. Listing waits for async source reloads (`awaitPendingReloads`) | **v2 only since the 0.33.0 port:** agent-core-v2 Workspace catalog and Session overlay; kap-server workspace list and activation error mapping |
+| `persist_default_model` | `true` | When `false`, model changes stay process-local and do not rewrite managed `config.toml` model settings | **v2 only since the 0.33.0 port:** `packages/agent-core-v2/src/app/kosongConfig/configSection.ts`, `packages/agent-core-v2/src/app/kosongConfig/kosongConfigService.ts` |
+| `agents_md_expand_includes` | `false` | When `true`, standalone `@path` lines in `AGENTS.md` are expanded at system-prompt assembly time (depth ≤ 5; missing/cycle/empty → HTML comments) | **v2 only since the 0.33.0 port:** agent-core-v2 profile context loader + `agentsMdExpandIncludes` config section |
+
+### Engine posture (0.33.0)
+
+Upstream `0.33.0` (`#2627`) makes **agent-core-v2 the default engine** for every CLI surface; v1 (`packages/agent-core`) is legacy behind `KIMI_CODE_LEGACY_FLAG=1` and receives maintenance fixes only. The 0.33.0 port therefore **dropped all v1-side fork features** (v1 `disabled_skills`, v1 `persist_default_model`, v1 include expansion, retired v1 exact-alias selection). The single v1-side keep is the wire-protocol 1.5 migration (`packages/agent-core/src/agent/records/migration/v1.5.ts`) so the legacy engine can still resume sessions written by v2 — upstream v1 remains at 1.4.
+
+Upstream `0.33.0` (`#2599`) also **deleted `apps/kimi-web`** (web UI source moved to the code-app repo; this repo ships a prebuilt `apps/kimi-code/dist-web`). The fork dropped the app and all its fork-only web UI features (managed quota sidebar card, web-side `disabled_skills` listing); the kap-server contracts below remain.
 
 ### Experimental
 
@@ -50,7 +56,7 @@ rg -n "disabled_skills|persist_default_model|agents_md_expand_includes|formatTer
 | Feature | Purpose |
 | --- | --- |
 | Stable terminal title | `formatTerminalTitle(workDir)` renders `[host] - ~/path` instead of changing with the session title |
-| Subagent model on cards | The bound model reaches Agent cards and AgentSwarm panels via the child's `agent.status.updated` (upstream's channel). v1's `subagent.spawned` no longer carries `model`; the roster tracker, kimi-web projector, and TUI all learn it from status updates |
+| Subagent model on cards | The bound model reaches Agent cards and AgentSwarm panels via the child's `agent.status.updated` — since 0.33.0 upstream itself carries `model` on that event, and the roster tracker / TUI learn it from status updates |
 | Persistent managed quota | The TUI footer shows rolling plan windows and refreshes them after model/session/provider changes; stale responses are ignored |
 
 **Managed quota note:** quota is shown only when the active model provider is `managed:kimi-code`. Custom providers never display these account limits. `/usage` and `/status` refresh the TUI footer values. There is no `/usages` command.
@@ -59,11 +65,10 @@ rg -n "disabled_skills|persist_default_model|agents_md_expand_includes|formatTer
 
 | Feature | Purpose |
 | --- | --- |
-| Managed quota sidebar card | Uses upstream `GET /api/v1/oauth/usage?provider=managed:kimi-code`; maps its snake_case wire response and ignores stale responses after model/provider changes |
-| Workspace skills honor `disabled_skills` | Session-less listing matches the session skill catalog |
+| Workspace skills honor `disabled_skills` | Session-less listing matches the session skill catalog (kap-server resolves the Workspace-scope skill catalog, not an ad-hoc composition) |
 | Activate disabled skill → `40912` | Disabled activation is a user-facing skill error rather than internal `50001` |
 
-There is intentionally no fork-only `/api/v1/usages` route. The quota UI must continue to use the upstream OAuth usage endpoint.
+There is intentionally no fork-only `/api/v1/usages` route, and since the 0.33.0 port no fork web UI: upstream removed `apps/kimi-web`, so the managed quota sidebar card was dropped with it. If web quota UI is wanted again, it belongs in the code-app repo that now owns the web source.
 
 ## Upstream contributions from this fork
 
@@ -71,8 +76,8 @@ There is intentionally no fork-only `/api/v1/usages` route. The quota UI must co
 | --- | --- | --- |
 | Issue: `disabled_skills` | https://github.com/MoonshotAI/kimi-code/issues/1982 | tracked upstream |
 | PR: `disabled_skills` | https://github.com/MoonshotAI/kimi-code/pull/1983 | open upstream (head `af63f9a3`); local port includes kap-server behavior |
-| `subagent-model-selection` | https://github.com/MoonshotAI/kimi-code/pull/1841 | carried locally on top of upstream secondary-model |
-| Plan quota footer/sidebar | https://github.com/MoonshotAI/kimi-code/pull/1827 | UI behavior carried locally; backend uses current upstream OAuth route |
+| `subagent-model-selection` | https://github.com/MoonshotAI/kimi-code/pull/1841 | **closed upstream, not merged**; carried locally on top of upstream secondary-model |
+| Plan quota footer | https://github.com/MoonshotAI/kimi-code/pull/1827 | **closed upstream, not merged**; TUI footer behavior carried locally on the upstream OAuth usage route; web sidebar dropped with `apps/kimi-web` in the 0.33.0 port |
 | `agents_md_expand_includes` | — | fork-only; security/design review needed before upstreaming |
 | `persist_default_model` | — | upstream candidate; not submitted |
 | Stable terminal title | — | weak upstream fit because it intentionally avoids session-title churn |
@@ -110,14 +115,15 @@ Then `kimi -c` can continue the previous healthy session for that workdir.
 
 ### A port dropped a feature
 
-If something disappears after syncing origin, compare against `backup/pre-*` and this file's tables, then duplicate the missing logical change onto `main@origin` or the current linear tip. Do not rebase the old merge-heavy history.
+If something disappears after syncing upstream, compare against `backup/pre-*` and this file's tables, then duplicate the missing logical change onto the current merge branch. Do not rebase the old merge-heavy history.
 
-## Bookmarks worth keeping
+## Branches worth keeping
 
-| Bookmark | Meaning |
+| Branch | Meaning |
 | --- | --- |
 | `main` | Shipping fork tip |
-| `main@origin` | Upstream tip (`bfa00807…`, version 0.31.1) |
+| `merge/upstream-0.33.0` | 0.33.0 port (merge of tag `@moonshot-ai/kimi-code@0.33.0`); integrate into `main` after verification |
+| `backup/pre-0.33.0-port` | Pre-port local tip at `174cce520ceaeb2112b3e671872db356f6732235` (last state on upstream 0.31.1) |
 | `backup/pre-0.29.2-port` | Pre-port local tip at `b01dc627cad94603a0246339ec527504690f7968` |
 | `backup/pre-0.29.1` | Older pre-0.29.1 local tip at `117f60d4816926a68e7d584f5d6f04e9dcd66411` |
 | `feat/disabled-skills` | Branch for upstream PR #1983; keep untouched during fork ports |
