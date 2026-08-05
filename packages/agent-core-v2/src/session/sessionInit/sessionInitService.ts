@@ -8,8 +8,9 @@
  * main agent's record stream so the UI shows the nested transcript and the
  * `subagent.*` records fire. Once the
  * subagent finishes, reloads `AGENTS.md` through the `profile` context helper
- * (over the os `hostFs` + host home dir, with the `bootstrap` brand dir) and
- * appends an `init`-variant system reminder to the main agent via
+ * (over the os `hostFs` + host home dir, with the `bootstrap` brand dir),
+ * re-seeds the main agent's `agentsMdReminder` known-set with the reloaded
+ * paths, and appends an `init`-variant system reminder to the main agent via
  * `systemReminder`, then flushes the main agent's wire journal. Bound at
  * Session scope.
  *
@@ -32,7 +33,8 @@ import {
   AGENTS_MD_EXPAND_INCLUDES_SECTION,
   type AgentsMdExpandIncludes,
 } from '#/agent/profile/configSection';
-import { loadAgentsMd } from '#/agent/profile/context';
+import { loadAgentsMdDetailed } from '#/agent/profile/context';
+import { IAgentAgentsMdReminderService } from '#/agent/agentsMdReminder/agentsMdReminder';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
 import { IAgentSystemReminderService } from '#/agent/systemReminder/systemReminder';
 import { IWireService } from '#/wire/wire';
@@ -111,7 +113,7 @@ export class SessionInitService implements ISessionInitService {
         cancel: (reason) => controller.abort(reason),
       });
 
-      const agentsMd = await loadAgentsMd(
+      const { content: agentsMd, paths: agentsMdPaths } = await loadAgentsMdDetailed(
         { fs: this.fs, homeDir: this.env.homeDir, pathClass: this.env.pathClass },
         this.sessionContext.cwd,
         this.bootstrap.homeDir,
@@ -120,6 +122,9 @@ export class SessionInitService implements ISessionInitService {
             this.config.get<AgentsMdExpandIncludes>(AGENTS_MD_EXPAND_INCLUDES_SECTION) === true,
         },
       );
+      main.accessor
+        .get(IAgentAgentsMdReminderService)
+        .seedInjected(agentsMdPaths, this.sessionContext.cwd);
       main.accessor
         .get(IAgentSystemReminderService)
         .appendSystemReminder(initCompletionReminder(agentsMd), {

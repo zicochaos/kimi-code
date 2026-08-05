@@ -14,7 +14,6 @@ import { IAgentSwarmService } from '#/agent/swarm/swarm';
 import { AgentSwarmService } from '#/agent/swarm/swarmService';
 import { SwarmModel } from '#/agent/swarm/swarmOps';
 import { SECONDARY_DERIVED_MODEL_ID } from '#/app/kosongConfig/secondaryModelOverlay';
-import type { IModelCatalog } from '#/kosong/model/catalog';
 import type { IModelService } from '#/kosong/model/model';
 import { AgentSwarmToolInputSchema } from '#/agent/tools/agent-swarm/agent-swarm';
 import { AgentSwarmTool } from '#/agent/tools/agent-swarm/agentSwarmTool';
@@ -25,12 +24,14 @@ import type {
   ResolvedToolExecutionHookContext,
 } from '#/agent/toolExecutor/toolHooks';
 import type { ToolCall } from '#/kosong/contract/message';
+import type { ModelCapability } from '#/kosong/contract/capability';
+import { IModelCatalog } from '#/kosong/model/catalog';
 import type { ExecutableToolContext } from '#/tool/toolContract';
 import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { AgentToolRegistryService } from '#/agent/toolRegistry/toolRegistryService';
 import { IAgentLoopService } from '#/agent/loop/loop';
 import { IConfigService } from '#/app/config/config';
-import type { AgentProfile } from '#/app/agentProfileCatalog/agentProfileCatalog';
+import { normalizeAgentProfile, type AgentProfile } from '#/app/agentProfileCatalog/agentProfileCatalog';
 import { ISessionAgentProfileCatalog } from '#/session/sessionAgentProfileCatalog/sessionAgentProfileCatalog';
 import { IAgentProfileService } from '#/agent/profile/profile';
 import { AppendLogStore } from '#/persistence/backends/node-fs/appendLogStore';
@@ -102,23 +103,23 @@ function stubConfig(section?: {
   } as unknown as IConfigService;
 }
 
-const DEFAULT_CALLER_PROFILE: AgentProfile = {
+const DEFAULT_CALLER_PROFILE: AgentProfile = normalizeAgentProfile({
   name: 'agent',
   description: 'test caller',
   systemPrompt: () => 'caller',
-};
+});
 
 const DEFAULT_SWARM_TARGET_PROFILES: readonly AgentProfile[] = [
-  {
+  normalizeAgentProfile({
     name: 'coder',
     description: 'test coder',
     systemPrompt: () => 'coder',
-  },
-  {
+  }),
+  normalizeAgentProfile({
     name: 'explore',
     description: 'test explorer',
     systemPrompt: () => 'explore',
-  },
+  }),
 ];
 
 function stubSwarmCatalog(
@@ -155,17 +156,14 @@ function stubModels(models: ReturnType<IModelService['list']> = {}): IModelServi
   } as unknown as IModelService;
 }
 
-function stubModelCatalog(): IModelCatalog {
+function stubModelCatalog(
+  capabilities: Readonly<Record<string, ModelCapability>> = {},
+): IModelCatalog {
   return {
     _serviceBrand: undefined,
-    get: (alias: string) => ({
-      provider: 'test',
-      model: alias,
-      maxContextSize: 128_000,
-    }),
+    get: (id: string) => ({ capabilities: capabilities[id] }),
   } as unknown as IModelCatalog;
 }
-
 
 describe('AgentSwarmService', () => {
   let disposables: DisposableStore;
@@ -483,12 +481,12 @@ describe('AgentSwarmTool', () => {
 
   it('uses the persisted caller allowlist instead of the current catalog profile', async () => {
     const host = mockSwarmHost();
-    const caller: AgentProfile = {
+    const caller: AgentProfile = normalizeAgentProfile({
       name: 'orchestrator',
       description: 'Orchestrator',
       subagents: ['coder'],
       systemPrompt: () => 'orchestrator',
-    };
+    });
     const tool = new AgentSwarmTool(
       host.swarmService,
       makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }),
@@ -891,12 +889,12 @@ describe('AgentSwarmTool', () => {
 
   it('keeps "primary" as the upstream choice when a configured alias collides', async () => {
     const host = mockSwarmHost();
-    const secondaryCoder: AgentProfile = {
+    const secondaryCoder: AgentProfile = normalizeAgentProfile({
       name: 'coder',
       description: 'test coder',
       modelPreference: 'secondary',
       systemPrompt: () => 'coder',
-    };
+    });
     const tool = new AgentSwarmTool(host.swarmService, makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }), mockSwarmMode(), stubConfig({ model: 'provider/secondary', defaultEffort: 'low' }), stubFlag(true), stubSwarmCatalog(DEFAULT_CALLER_PROFILE, [secondaryCoder]), stubCallerProfile({ modelAlias: 'main-model', thinkingLevel: 'high' }), stubModels({ primary: { model: 'provider/configured-primary' } }), stubModelCatalog());
 
     await executeTool(
@@ -930,15 +928,44 @@ describe('AgentSwarmTool', () => {
 
   it('advertises both selectable models in the description only when configured', async () => {
     const host = mockSwarmHost();
-    const configured = new AgentSwarmTool(host.swarmService, makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }), mockSwarmMode(), stubConfig({ model: 'provider/secondary' }), stubFlag(true), stubSwarmCatalog(), stubCallerProfile({ modelAlias: 'main-model' }), stubModels(), stubModelCatalog());
+    const configured = new AgentSwarmTool(host.swarmService, makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }), mockSwarmMode(), stubConfig({ model: 'provider/secondary' }), stubFlag(true), stubSwarmCatalog(), stubCallerProfile({ modelAlias: 'main-model' }), stubModels(), stubModelCatalog({
+      'provider/secondary': { image_in: true, video_in: false, audio_in: false, thinking: true, tool_use: true, max_context_tokens: 262_144 },
+      'main-model': { image_in: false, video_in: false, audio_in: false, thinking: false, tool_use: true, max_context_tokens: 262_144 },
+    }));
 
     expect(configured.description).toContain('Available models (pass via model):');
-    expect(configured.description).toContain('- secondary: provider/secondary (default)');
-    expect(configured.description).toContain('- primary: main-model');
+    expect(configured.description).toContain(
+      '- secondary: provider/secondary (default) — the configured secondary model; prefer it for routine subagent tasks; capabilities: image_in, thinking, tool_use',
+    );
+    expect(configured.description).toContain(
+      '- primary: main-model — the main model you are running on; use it for hard, quality-sensitive subagent tasks; capabilities: tool_use',
+    );
 
     const unconfigured = new AgentSwarmTool(host.swarmService, makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }), mockSwarmMode(), stubConfig(), stubFlag(true), stubSwarmCatalog(), stubCallerProfile({ modelAlias: 'main-model' }), stubModels(), stubModelCatalog());
 
     expect(unconfigured.description).not.toContain('Available models');
+  });
+
+  it('reads secondary capabilities from the derived entry when the recipe carries patch fields', async () => {
+    const host = mockSwarmHost();
+    const tool = new AgentSwarmTool(host.swarmService, makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }), mockSwarmMode(), stubConfig({ model: 'provider/secondary', defaultEffort: 'low' }), stubFlag(true), stubSwarmCatalog(), stubCallerProfile({ modelAlias: 'main-model' }), stubModels(), stubModelCatalog({
+      [SECONDARY_DERIVED_MODEL_ID]: { image_in: false, video_in: false, audio_in: false, thinking: true, tool_use: true, max_context_tokens: 131_072 },
+      'main-model': { image_in: true, video_in: false, audio_in: false, thinking: false, tool_use: true, max_context_tokens: 262_144 },
+    }));
+
+    expect(tool.description).toContain(
+      '- secondary: provider/secondary (default) — the configured secondary model; prefer it for routine subagent tasks; capabilities: thinking, tool_use',
+    );
+    expect(tool.description).toContain('capabilities: image_in, tool_use');
+  });
+
+  it('omits the capabilities suffix for models the catalog cannot resolve', async () => {
+    const host = mockSwarmHost();
+    const tool = new AgentSwarmTool(host.swarmService, makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }), mockSwarmMode(), stubConfig({ model: 'provider/secondary' }), stubFlag(true), stubSwarmCatalog(), stubCallerProfile({ modelAlias: 'main-model' }), stubModels(), stubModelCatalog());
+
+    expect(tool.description).toContain('- secondary: provider/secondary (default)');
+    expect(tool.description).toContain('- primary: main-model');
+    expect(tool.description).not.toContain('capabilities:');
   });
 
   it('omits resume hint when incomplete subagents have no agent ids', async () => {

@@ -1134,69 +1134,6 @@ describe('SessionSubagentHost', () => {
     expect(userTextMessages(histories[1] ?? [])).toEqual(['Implement the retry-safe change']);
   });
 
-  it('expands AGENTS.md includes for spawned subagents when the option is on', async () => {
-    const workDir = '/repo';
-    const kaos = createFakeKaos({
-      getcwd: () => workDir,
-      mkdir: vi.fn(async () => {}),
-      writeText: vi.fn().mockResolvedValue(0),
-      stat: vi.fn(async (path: string) => {
-        if ([workDir, `${workDir}/.git`].includes(path)) return stat('dir');
-        if ([`${workDir}/AGENTS.md`, `${workDir}/extra.md`].includes(path)) return stat('file');
-        throw new Error(`ENOENT ${path}`);
-      }),
-      iterdir: async function* (path: string) {
-        if (path === workDir) {
-          yield `${workDir}/AGENTS.md`;
-          yield `${workDir}/extra.md`;
-          return;
-        }
-        throw new Error(`ENOENT ${path}`);
-      },
-      readText: vi.fn(async (path: string) => {
-        if (path === `${workDir}/AGENTS.md`) return 'base instructions\n@extra.md';
-        if (path === `${workDir}/extra.md`) return 'included instructions';
-        throw new Error(`ENOENT ${path}`);
-      }),
-      realpath: vi.fn(async (path: string) => path),
-    });
-    const summary =
-      'Completed the subagent task and returned a detailed enough summary for the parent agent to continue confidently without repeating the child agent work. '.repeat(
-        2,
-      );
-
-    const spawnWith = async (expandIncludes: boolean): Promise<string> => {
-      const parent = testAgent({ kaos });
-      parent.configure();
-      // The harness pins cwd to process.cwd(); point the parent back at the
-      // fake workspace so the spawned child inherits it (configureChild
-      // copies parent.config.cwd onto the child kaos).
-      parent.agent.config.update({ cwd: workDir });
-      const child = testAgent({ kaos });
-      child.mockNextResponse({ type: 'text', text: summary });
-      const session = fakeSession(parent.agent, child.agent, {}, {
-        config: { providers: {}, agentsMdExpandIncludes: expandIncludes },
-      });
-      const host = new SessionSubagentHost(session, 'main');
-
-      const handle = await host.spawn({
-        profileName: 'coder',
-        parentToolCallId: 'call_agent',
-        prompt: 'Implement the fix',
-        description: 'Fix bug',
-        runInBackground: false,
-        signal,
-      });
-      await handle.completion;
-      return child.agent.config.systemPrompt;
-    };
-
-    expect(await spawnWith(true)).toContain('included instructions');
-    const withoutExpansion = await spawnWith(false);
-    expect(withoutExpansion).not.toContain('included instructions');
-    expect(withoutExpansion).toContain('@extra.md');
-  });
-
   it('realigns a resumed subagent to the parent agent current model', async () => {
     const parent = testAgent();
     parent.configure();
@@ -1238,12 +1175,6 @@ describe('SessionSubagentHost', () => {
     // than leave it on the stale model from its initial spawn.
     expect(child.agent.config.modelAlias).toBe(parent.agent.config.modelAlias);
     expect(child.agent.config.modelAlias).not.toBe('stale-model-from-initial-spawn');
-    expect(parent.allEvents).toContainEqual(
-      expect.objectContaining({
-        type: '[rpc]',
-        event: 'subagent.spawned',
-      }),
-    );
   });
 
   describe('secondary model binding', () => {

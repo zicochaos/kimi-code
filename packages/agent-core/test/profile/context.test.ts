@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 
@@ -124,104 +124,6 @@ describe('loadAgentsMd oversized content', () => {
 
     expect(result).toContain(largeContent);
     expect(result).not.toContain('truncated or omitted');
-  });
-});
-
-describe('loadAgentsMd expandIncludes', () => {
-  it('leaves @path lines as text when expandIncludes is off', async () => {
-    const rulesDir = await mkdtemp(join(tmpdir(), 'kimi-agents-rules-'));
-    extraDirs.push(rulesDir);
-    await writeFile(join(rulesDir, 'python.md'), 'python rule body', 'utf-8');
-    await writeFile(join(workDir, 'AGENTS.md'), `@${join(rulesDir, 'python.md')}\nlocal instructions\n`, 'utf-8');
-
-    const result = await loadAgentsMd(testKaos);
-
-    expect(result).toContain(`@${join(rulesDir, 'python.md')}`);
-    expect(result).not.toContain('python rule body');
-    expect(result).toContain('local instructions');
-  });
-
-  it('inlines project-relative and user-level absolute includes when expandIncludes is true', async () => {
-    const userRulesDir = await mkdtemp(join(tmpdir(), 'kimi-agents-user-rules-'));
-    extraDirs.push(userRulesDir);
-    await writeFile(join(userRulesDir, 'python.md'), 'python rule body', 'utf-8');
-    await mkdir(join(homeDir, '.kimi-code'), { recursive: true });
-    await writeFile(
-      join(homeDir, '.kimi-code', 'AGENTS.md'),
-      `@${join(userRulesDir, 'python.md')}`,
-      'utf-8',
-    );
-    await writeFile(join(workDir, 'relative-rule.md'), 'relative rule body', 'utf-8');
-    await writeFile(join(workDir, 'AGENTS.md'), '@relative-rule.md\nlocal instructions', 'utf-8');
-
-    const result = await loadAgentsMd(testKaos, undefined, { expandIncludes: true });
-
-    expect(result).toContain('python rule body');
-    expect(result).toContain('relative rule body');
-    expect(result).toContain('local instructions');
-    expect(result).toContain('<!-- Include:');
-    expect(result).not.toMatch(/^@/m);
-  });
-
-  it('blocks project-level absolute includes outside the project root', async () => {
-    const outsideDir = await mkdtemp(join(tmpdir(), 'kimi-agents-outside-'));
-    extraDirs.push(outsideDir);
-    await writeFile(join(outsideDir, 'secret.md'), 'outside absolute secret', 'utf-8');
-    await writeFile(join(workDir, 'AGENTS.md'), `@${join(outsideDir, 'secret.md')}`, 'utf-8');
-
-    const result = await loadAgentsMd(testKaos, undefined, { expandIncludes: true });
-
-    expect(result).toContain(`<!-- blocked include: ${join(outsideDir, 'secret.md')} -->`);
-    expect(result).not.toContain('outside absolute secret');
-  });
-
-  it('blocks project-level traversal outside the project root', async () => {
-    const parentDir = await mkdtemp(join(tmpdir(), 'kimi-agents-project-parent-'));
-    extraDirs.push(parentDir);
-    const projectDir = join(parentDir, 'project');
-    await mkdir(projectDir);
-    await writeFile(join(parentDir, 'secret.md'), 'outside traversal secret', 'utf-8');
-    await writeFile(join(projectDir, 'AGENTS.md'), '@../secret.md', 'utf-8');
-
-    vi.spyOn(testKaos, 'getcwd').mockReturnValue(projectDir);
-    const result = await loadAgentsMd(testKaos, undefined, { expandIncludes: true });
-
-    expect(result).toContain('<!-- blocked include: ../secret.md -->');
-    expect(result).not.toContain('outside traversal secret');
-  });
-
-  it('blocks project-level symlink escapes outside the project root', async () => {
-    const outsideDir = await mkdtemp(join(tmpdir(), 'kimi-agents-outside-'));
-    extraDirs.push(outsideDir);
-    await writeFile(join(outsideDir, 'secret.md'), 'outside symlink secret', 'utf-8');
-    await symlink(join(outsideDir, 'secret.md'), join(workDir, 'linked-rule.md'));
-    await writeFile(join(workDir, 'AGENTS.md'), '@linked-rule.md', 'utf-8');
-
-    const result = await loadAgentsMd(testKaos, undefined, { expandIncludes: true });
-
-    expect(result).toContain('<!-- blocked include: linked-rule.md -->');
-    expect(result).not.toContain('outside symlink secret');
-  });
-
-  it('marks missing includes without dropping the rest of the file', async () => {
-    await writeFile(join(workDir, 'AGENTS.md'), '@missing-rule.md\nkeep me\n', 'utf-8');
-
-    const result = await loadAgentsMd(testKaos, undefined, { expandIncludes: true });
-
-    expect(result).toContain('<!-- missing include: missing-rule.md -->');
-    expect(result).toContain('keep me');
-  });
-
-  it('breaks include cycles with a marker', async () => {
-    await writeFile(join(workDir, 'a.md'), '@b.md\nfrom a\n', 'utf-8');
-    await writeFile(join(workDir, 'b.md'), '@a.md\nfrom b\n', 'utf-8');
-    await writeFile(join(workDir, 'AGENTS.md'), '@a.md\n', 'utf-8');
-
-    const result = await loadAgentsMd(testKaos, undefined, { expandIncludes: true });
-
-    expect(result).toContain('from a');
-    expect(result).toContain('from b');
-    expect(result).toContain('<!-- circular include: a.md -->');
   });
 });
 

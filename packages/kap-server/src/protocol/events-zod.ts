@@ -25,7 +25,7 @@ import type {
   TaskOrigin,
   UserPromptOrigin,
 } from '@moonshot-ai/agent-core-v2/agent/contextMemory/types';
-import { messageContentSchema } from '@moonshot-ai/agent-core-v2/agent/contextMemory/protocolMessage';
+import { messageContentSchema } from './message';
 import type { HookResultEvent } from '@moonshot-ai/agent-core-v2/agent/externalHooks/externalHooksService';
 import type {
   CompactionBlockedEvent,
@@ -307,6 +307,12 @@ export const kimiErrorCodeSchema = z.enum([
   'session.question_handler_error',
   'session.init_failed',
   'agent.not_found',
+  'agent.already_exists',
+  'agent.already_running',
+  'agent.not_a_subagent',
+  'agent.not_owned',
+  'agent.type_not_allowed',
+  'agent.max_tokens_exceeded',
   'activity.agent_busy',
   'activity.cancelling',
   'activity.disposing',
@@ -344,15 +350,19 @@ export const kimiErrorCodeSchema = z.enum([
   'skill.type_unsupported',
   'skill.name_empty',
   'skill.disabled',
+  'skill.parse_failed',
+  'skill.nested_too_deep',
   'records.write_failed',
   'compaction.failed',
   'compaction.unable',
   'task.task_id_empty',
+  'task.limit_exceeded',
   'usage.turn_id_conflict',
   'mcp.server_not_found',
   'mcp.server_disabled',
   'mcp.startup_failed',
   'mcp.tool_name_collision',
+  'mcp.oauth_failed',
   'message.not_found',
   'plugin.not_found',
   'plugin.load_failed',
@@ -377,6 +387,13 @@ export const kimiErrorCodeSchema = z.enum([
   'fs.too_many_results',
   'fs.grep_timeout',
   'fs.git_unavailable',
+  'wire.migration_missing',
+  'storage.permission_denied',
+  'storage.disk_full',
+  'cron.expression_invalid',
+  'web.invalid_url',
+  'web.private_address',
+  'web.fetch_failed',
   'validation.failed',
   'not_implemented',
   'internal',
@@ -453,6 +470,7 @@ export const toolUpdateSchema = z.object({
 export const mcpOAuthAuthorizationUrlUpdateDataSchema = z.object({
   serverName: z.string(),
   authorizationUrl: z.string(),
+  expiresAt: z.number().optional(),
 }) satisfies z.ZodType<McpOAuthAuthorizationUrlUpdateData>;
 
 export const turnEndReasonSchema = z.enum(['completed', 'cancelled', 'failed', 'blocked']) satisfies z.ZodType<TurnEndReason>;
@@ -597,6 +615,16 @@ export const configChangedEventSchema = z.object({
   type: z.literal('event.config.changed'),
   changed_fields: z.array(z.string()),
   config: configResponseSchema,
+});
+
+export const configWarningEventSchema = z.object({
+  type: z.literal('event.config.warning'),
+  warnings: z.array(
+    z.object({
+      domain: z.string().optional(),
+      message: z.string(),
+    }),
+  ),
 });
 
 export const goalUpdatedEventSchema = z.object({

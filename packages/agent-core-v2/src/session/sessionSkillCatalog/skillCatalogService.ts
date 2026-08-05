@@ -25,7 +25,7 @@ import {
 } from '#/app/skillCatalog/configSection';
 import { InMemorySkillCatalog } from '#/app/skillCatalog/registry';
 import type { SkillContribution } from '#/app/skillCatalog/skillSource';
-import type { SkillCatalog } from '#/app/skillCatalog/types';
+import { summarizeSkill, type SkillCatalog, type SkillSummary } from '#/app/skillCatalog/types';
 import { ISessionStateService } from '#/session/state/sessionState';
 
 import { ISessionSkillCatalog, type ISkillCatalogSink } from './skillCatalog';
@@ -99,6 +99,11 @@ export class SessionSkillCatalogService
   async awaitPendingReloads(): Promise<void> {
     await this.data.awaitPendingReloads();
     this.remerge();
+  }
+
+  async list(): Promise<readonly SkillSummary[]> {
+    await this.ready;
+    return this.catalog.listSkills().map(summarizeSkill);
   }
 
   set(id: string, c: SkillContribution, { priority }: { readonly priority: number }): void {

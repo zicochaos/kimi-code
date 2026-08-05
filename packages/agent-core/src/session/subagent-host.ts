@@ -452,10 +452,7 @@ export class SessionSubagentHost {
     const context = await prepareSystemPromptContext(
       this.session.systemContextKaos(child.kaos.getcwd()),
       this.session.options.kimiHomeDir,
-      {
-        additionalDirs: child.getAdditionalDirs(),
-        expandIncludes: this.session.options.config?.agentsMdExpandIncludes === true,
-      },
+      { additionalDirs: child.getAdditionalDirs() },
     );
     const subagentNames = Object.keys(
       this.session.agentCatalog.delegatableSubagents(profile.name),

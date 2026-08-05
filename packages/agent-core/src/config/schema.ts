@@ -351,7 +351,6 @@ export const KimiConfigSchema = z.object({
   services: ServicesConfigSchema.optional(),
   mergeAllAvailableSkills: z.boolean().optional(),
   extraSkillDirs: z.array(z.string()).optional(),
-  disabledSkills: z.array(z.string()).optional(),
   extraAgentDirs: z.array(z.string()).optional(),
   loopControl: LoopControlSchema.optional(),
   background: BackgroundConfigSchema.optional(),
@@ -362,8 +361,6 @@ export const KimiConfigSchema = z.object({
   modelCatalog: ModelCatalogConfigSchema.optional(),
   experimental: ExperimentalConfigSchema.optional(),
   telemetry: z.boolean().optional(),
-  persistDefaultModel: z.boolean().optional(),
-  agentsMdExpandIncludes: z.boolean().optional(),
   raw: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -403,7 +400,6 @@ export const KimiConfigPatchSchema = z
     services: ServicesConfigPatchSchema.optional(),
     mergeAllAvailableSkills: z.boolean().optional(),
     extraSkillDirs: z.array(z.string()).optional(),
-    disabledSkills: z.array(z.string()).optional(),
     extraAgentDirs: z.array(z.string()).optional(),
     loopControl: LoopControlPatchSchema.optional(),
     background: BackgroundConfigPatchSchema.optional(),
@@ -414,8 +410,6 @@ export const KimiConfigPatchSchema = z
     modelCatalog: ModelCatalogConfigPatchSchema.optional(),
     experimental: ExperimentalConfigPatchSchema.optional(),
     telemetry: z.boolean().optional(),
-    persistDefaultModel: z.boolean().optional(),
-    agentsMdExpandIncludes: z.boolean().optional(),
   })
   .strict();
 

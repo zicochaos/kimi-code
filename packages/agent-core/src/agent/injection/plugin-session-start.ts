@@ -9,7 +9,6 @@ export interface RenderPluginSessionStartReminderInput {
     | {
         getPluginSkill(pluginId: string, name: string): SkillDefinition | undefined;
         renderSkillPrompt(skill: SkillDefinition, args: string): string;
-        isSkillDisabled(name: string): boolean;
       }
     | undefined;
   readonly log?: { warn(message: string, payload?: unknown): void };
@@ -31,7 +30,6 @@ export function renderPluginSessionStartReminder(
   if (registry === undefined) return undefined;
   const blocks: string[] = [];
   for (const sessionStart of sessionStarts) {
-    if (registry.isSkillDisabled(sessionStart.skillName)) continue;
     const skill = registry.getPluginSkill(sessionStart.pluginId, sessionStart.skillName);
     if (skill === undefined) {
       log?.warn('plugin sessionStart skill not found', {

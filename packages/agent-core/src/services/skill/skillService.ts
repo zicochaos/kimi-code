@@ -50,10 +50,7 @@ export class SkillService extends Disposable implements ISkillService {
         if (error.code === ErrorCodes.SKILL_NOT_FOUND || error.code === ErrorCodes.SKILL_NAME_EMPTY) {
           throw new SkillNotFoundError(skillName, error.message);
         }
-        if (
-          error.code === ErrorCodes.SKILL_TYPE_UNSUPPORTED ||
-          error.code === ErrorCodes.SKILL_DISABLED
-        ) {
+        if (error.code === ErrorCodes.SKILL_TYPE_UNSUPPORTED) {
           throw new SkillNotActivatableError(skillName, error.message);
         }
       }

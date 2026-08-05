@@ -87,27 +87,9 @@ extra_skill_dirs = ["~/team-skills", ".agents/team-skills"]
 disabled_skills = ["review-helper", "legacy-helper"]
 ```
 
-名称匹配不区分大小写。被禁用的 Skill 会从模型列表中移除，被 `Skill` 工具拒绝，不出现在斜杠菜单中，也无法由用户激活。被禁用的 Skill 也不会由插件的 `sessionStart` hook 注入——无论是在会话启动时还是 reload 之后。磁盘上的文件会保留，供其他工具使用。修改 `config.toml` 后执行 `/reload`；当前会话会立即刷新，无需重启。
+名称匹配不区分大小写。被禁用的 Skill 会从模型列表中移除、被 `Skill` 工具拒绝、不出现在斜杠菜单中，也无法由用户激活；磁盘上的文件保留，供其他工具使用。修改 `config.toml` 后执行 `/reload`，当前会话无需重启即可刷新。若要一并拦截用 `Bash` 等工具「复现」Skill 工作流的 shell 路径，请再添加 [`permission`](../configuration/config-files.md#permission) deny 规则。
 
-这比 frontmatter 的 `disableModelInvocation: true` 更强（后者只阻止模型自动调用，仍允许斜杠调用），也比针对 `Skill(...)` 的 permission deny 规则更强（后者可能拦截工具调用，但 Skill 仍会出现在模型列表中）。
-
-`disabled_skills` 只覆盖 Skill 表面。Agent 仍可能用其他工具「复现」Skill 的工作流——例如根据 handoff 文档或先前对话，用 `Bash` 直接跑辅助二进制。若要一并拦住这类 shell 路径，再加 deny 规则（YOLO 模式下 deny 仍然生效）：
-
-```toml
-disabled_skills = ["review-helper", "legacy-helper"]
-
-[[permission.rules]]
-decision = "deny"
-pattern = "Bash(*review-helper-cli*)"
-
-[[permission.rules]]
-decision = "deny"
-pattern = "Bash(*legacy-helper-cli*)"
-```
-
-完整规则格式见 [Permission 规则](../configuration/config-files.md#permission)。
-
-**内置 Skills** 随 CLI 一起分发，优先级最低。它们为常见任务提供开箱即用的工作流，例如配置 MCP server、定制 TUI 主题和编辑配置文件。完整列表详见[内置 Skill 命令](../reference/slash-commands.md#内置-skill-命令)。
+**内置 Skills** 随 CLI 一起分发，优先级最低。它们为常见任务提供开箱即用的工作流，例如配置 MCP server、定制 TUI 主题和编辑配置文件。完整列表详见[内置 Skill 命令](../reference/slash-commands.md#内置-skill-命令)。其中介绍 Kimi Code 自身的部分可以通过顶层 [`builtin_product_skills`](../configuration/config-files.md#顶层字段) 字段关闭。
 
 ## 调用 Skill
 
