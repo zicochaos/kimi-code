@@ -14,9 +14,10 @@
  * read/written through it. Bound at Workspace scope.
  */
 
-import { Disposable } from '#/_base/di/lifecycle';
+import { Service } from '#/_base/di/service';
 import { Emitter, type Event } from '#/_base/event';
-import { LifecycleScope, ScopeActivation, registerScopedService } from '#/_base/di/scope';
+import { LifecycleScope } from '#/app/scopes';
+import { ScopeActivation, registerScopedService } from '#/_base/di/scope';
 import { defineState } from '#/_base/state/stateRegistry';
 import { IBuiltinSkillSource } from '#/app/skillCatalog/builtinSkillSource';
 import { IConfigService } from '#/app/config/config';
@@ -45,7 +46,7 @@ export const workspaceSkillCatalogMergedKey = defineState<InMemorySkillCatalog>(
   () => new InMemorySkillCatalog(),
 );
 
-export class WorkspaceSkillCatalogService extends Disposable implements IWorkspaceSkillCatalog {
+export class WorkspaceSkillCatalogService extends Service implements IWorkspaceSkillCatalog {
   declare readonly _serviceBrand: undefined;
 
   private readonly sources: readonly ISkillSource[];
@@ -61,7 +62,7 @@ export class WorkspaceSkillCatalogService extends Disposable implements IWorkspa
     @IExtraFileSkillSource extra: IExtraFileSkillSource,
     @IWorkspaceRootSkillSource workspace: IWorkspaceRootSkillSource,
     @IPluginSkillSource plugin: IPluginSkillSource,
-    @IConfigService private readonly config: IConfigService,
+    @IConfigService override readonly config: IConfigService,
     @IWorkspaceStateService private readonly states: IWorkspaceStateService,
   ) {
     super();

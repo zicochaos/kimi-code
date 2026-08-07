@@ -29,7 +29,8 @@
  */
 
 import { Disposable } from '#/_base/di/lifecycle';
-import { LifecycleScope, ScopeActivation, registerScopedService } from '#/_base/di/scope';
+import { LifecycleScope } from '#/app/scopes';
+import { ScopeActivation, registerScopedService } from '#/_base/di/scope';
 import { ILogService } from '#/_base/log/log';
 import { retryBackoffDelays, sleepForRetry } from '#/_base/utils/retry';
 
@@ -55,6 +56,7 @@ import {
 /** Persist attempts per write; see `replaceWithRetry` for why this stays small. */
 const PERSIST_MAX_ATTEMPTS = 3;
 
+// NOTE: stays Disposable — its own 'config' collides with the Fiber
 export class KosongConfigService extends Disposable implements IKosongConfigService {
   declare readonly _serviceBrand: undefined;
 
