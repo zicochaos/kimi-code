@@ -2,14 +2,14 @@
 
 This file tracks **what diverges from upstream** (`MoonshotAI/kimi-code`) so rebases do not drop local product behavior. Update it whenever a fork-only feature is added, restored, or abandoned.
 
-**Upstream base we track:** `@moonshot-ai/kimi-code@0.33.0` / tag `4e43d6fb5ddd2e774e2fd7a006906a5bd41715c2` (`git fetch upstream --tags`, remote `upstream` = `MoonshotAI/kimi-code`, `origin` = this fork)  
-**Local main tip:** see `git log main` (0.33.0 port lives on merge branch `merge/upstream-0.33.0` until integrated)
+**Upstream base we track:** `@moonshot-ai/kimi-code@0.34.0` / `main@origin` (release 2026-08-06; remote `origin` = `MoonshotAI/kimi-code`, `fork` = this fork)
+**Local main tip:** see `git log main` (0.34.0 port lives on merge branch `merge/upstream-0.34.0` until integrated)
 
 ## How to merge a new upstream without losing options
 
-1. `git fetch upstream --tags`
-2. Backup: `git branch backup/pre-<ver>-port main`
-3. Create a merge branch (`git checkout -b merge/upstream-<ver> main`) and merge the upstream tag; do not rebase the merge-heavy fork history.
+1. `git fetch origin --tags`
+2. Backup: `git tag backup/pre-<ver>-port main`
+3. Create a merge branch (`git switch -c merge/upstream-<ver> main`) and merge the upstream tag; do not rebase the merge-heavy fork history.
 4. Prefer upstream implementations where they provide the same or better behavior, then restore only the missing contracts listed below.
 5. Resolve docs conflicts carefully, especially mirrored EN/ZH pages, and update this file's upstream base.
 6. Update this file if the set of options changes.
@@ -32,11 +32,13 @@ rg -n "disabled_skills|persist_default_model|agents_md_expand_includes|formatTer
 | `persist_default_model` | `true` | When `false`, model changes stay process-local and do not rewrite managed `config.toml` model settings | **v2 only since the 0.33.0 port:** `packages/agent-core-v2/src/app/kosongConfig/configSection.ts`, `packages/agent-core-v2/src/app/kosongConfig/kosongConfigService.ts` |
 | `agents_md_expand_includes` | `false` | When `true`, standalone `@path` lines in `AGENTS.md` are expanded at system-prompt assembly time (depth ≤ 5; missing/cycle/empty → HTML comments) | **v2 only since the 0.33.0 port:** agent-core-v2 profile context loader + `agentsMdExpandIncludes` config section |
 
-### Engine posture (0.33.0)
+### Engine posture (0.33.0 / 0.34.0)
 
 Upstream `0.33.0` (`#2627`) makes **agent-core-v2 the default engine** for every CLI surface; v1 (`packages/agent-core`) is legacy behind `KIMI_CODE_LEGACY_FLAG=1` and receives maintenance fixes only. The 0.33.0 port therefore **dropped all v1-side fork features** (v1 `disabled_skills`, v1 `persist_default_model`, v1 include expansion, retired v1 exact-alias selection). The single v1-side keep is the wire-protocol 1.5 migration (`packages/agent-core/src/agent/records/migration/v1.5.ts`) so the legacy engine can still resume sessions written by v2 — upstream v1 remains at 1.4.
 
 Upstream `0.33.0` (`#2599`) also **deleted `apps/kimi-web`** (web UI source moved to the code-app repo; this repo ships a prebuilt `apps/kimi-code/dist-web`). The fork dropped the app and all its fork-only web UI features (managed quota sidebar card, web-side `disabled_skills` listing); the kap-server contracts below remain.
+
+Upstream `0.34.0` highlights absorbed by this port: cache-expiry hint dialog, Windows Computer Use, `/api/v2/sessions` (v1 envelope), full-text search index isolation (minidb), L3 unit layer + Feature seam (plan mode moved to `src/features/plan/**`), MCP tombstoning, UTF-16 file reading, and upstream's own subagent bound-model + thinking-effort surfacing (`#2679`) — which **subsumes the fork's subagent-model display plumbing** (the port adopts upstream's `model`/`thinkingEffort` fields and `subagentDisplayModel` normalization; the fork keeps only its exact-alias selection feature and the `model` field on `subagent.spawned`).
 
 ### Experimental
 
@@ -122,8 +124,15 @@ If something disappears after syncing upstream, compare against `backup/pre-*` a
 | Branch | Meaning |
 | --- | --- |
 | `main` | Shipping fork tip |
-| `merge/upstream-0.33.0` | 0.33.0 port (merge of tag `@moonshot-ai/kimi-code@0.33.0`); integrate into `main` after verification |
+| `merge/upstream-0.34.0` | 0.34.0 port (merge of `main@origin` at `@moonshot-ai/kimi-code@0.34.0`); integrate into `main` after verification |
+| `merge/upstream-0.33.0` | 0.33.0 port (integrated) |
+| `backup/pre-0.34.0-port` (tag) | Pre-port local tip at `a1054918b` (last state on upstream 0.33.0) |
+| `backup/pre-jj-migration` (tag) | Same tip — snapshot from the jj→git migration on 2026-08-07. The `.jj` store was archived out of the repo; this repo is now plain git |
 | `backup/pre-0.33.0-port` | Pre-port local tip at `174cce520ceaeb2112b3e671872db356f6732235` (last state on upstream 0.31.1) |
 | `backup/pre-0.29.2-port` | Pre-port local tip at `b01dc627cad94603a0246339ec527504690f7968` |
 | `backup/pre-0.29.1` | Older pre-0.29.1 local tip at `117f60d4816926a68e7d584f5d6f04e9dcd66411` |
 | `feat/disabled-skills` | Branch for upstream PR #1983; keep untouched during fork ports |
+
+## jj → git migration (2026-08-07)
+
+This repo used to be a jj (Jujutsu) working copy on top of the git store. jj is retired: the `.jj` directory was archived to `.tmp/jj-repo-archive-20260807.tar.gz` (gitignored) and removed. All history, branches, bookmarks and backup tags live in plain git now; the five jj workspaces (`default`, `disabled-skills`, `fork-0.29.1`, `fork-disabled-fixes`, `upstream-0.31.1`) were stale metadata with no checkouts on disk. If ancient jj state is ever needed, restore the archive back to `.jj/`.

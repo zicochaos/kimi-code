@@ -142,6 +142,7 @@ export class SubAgentEventHandler {
         contextTokens: event.contextTokens,
         usage: totalUsage,
         modelDisplay: resolvedModel,
+        effortDisplay: this.subagentEffortDisplay(event.thinkingEffort),
       });
     }
     return true;
@@ -384,10 +385,8 @@ export class SubAgentEventHandler {
       parentToolCallId: event.parentToolCallId,
       agentName: event.subagentName,
       description: typeof description === 'string' ? description : undefined,
-      model:
-        event.model === undefined
-          ? undefined
-          : modelDisplayName(event.model, this.host.state.appState.availableModels[event.model]),
+      model: this.spawnedModelDisplay(event),
+      effort: this.subagentEffortDisplay(event.thinkingEffort),
     };
   }
 
@@ -424,11 +423,19 @@ export class SubAgentEventHandler {
   private handleForegroundSubagentSpawned(
     event: SubagentLifecycleEventOf<'subagent.spawned'>,
   ): void {
+    // The spawned event carries the display-normalized bound alias (newer
+    // cores) — show it at spawn instead of waiting for the child's first
+    // status frame. The `agent.status.updated` channel below stays as the
+    // in-run update/fallback path.
+    const modelDisplay = this.spawnedModelDisplay(event);
+    const effortDisplay = this.subagentEffortDisplay(event.thinkingEffort);
     if (this.updateAgentSwarmProgress(event.parentToolCallId, (progress) => {
       progress.registerSubagent({
         agentId: event.subagentId,
         swarmIndex: event.swarmIndex,
       });
+      if (modelDisplay !== undefined) progress.setModelDisplay(modelDisplay);
+      if (effortDisplay !== undefined) progress.setEffortDisplay(effortDisplay);
     })) {
       return;
     }
@@ -442,6 +449,26 @@ export class SubAgentEventHandler {
       runInBackground: event.runInBackground,
       model: event.model,
     });
+    if (modelDisplay !== undefined || effortDisplay !== undefined) {
+      tc.updateSubagentMetrics({ modelDisplay, effortDisplay });
+    }
+  }
+
+  /** Map the spawned event's bound alias to a display name via the loaded
+   *  model catalog; falls back to the alias itself for unknown entries. */
+  private spawnedModelDisplay(
+    event: SubagentLifecycleEventOf<'subagent.spawned'>,
+  ): string | undefined {
+    if (event.model === undefined) return undefined;
+    return modelDisplayName(event.model, this.host.state.appState.availableModels[event.model]);
+  }
+
+  /** Concrete effort levels are always shown; the boolean states carry no
+   *  level information — 'off' (no thinking) and 'on' (generic thinking) are
+   *  both hidden. */
+  private subagentEffortDisplay(effort: string | undefined): string | undefined {
+    if (effort === undefined || effort === 'off' || effort === 'on') return undefined;
+    return effort;
   }
 
   private handleForegroundSubagentStarted(
@@ -528,15 +555,15 @@ export class SubAgentEventHandler {
       progress.recordToolCall({ agentId: subagentId, toolCallId: event.toolCallId });
     } else if (event.type === 'agent.status.updated' && event.model !== undefined) {
       // The bound model alias rides every child status update (emitted right
-      // after spawn). The panel shows the model once in the header instead of
-      // per cell — but only while every reported member agrees on it.
-      // `modelDisplayName` falls back to the alias itself when the entry is
-      // unknown (e.g. the synthesized `__secondary__` derived entry is
-      // missing).
-      progress.setMemberModel(
-        subagentId,
+      // after spawn). Swarm members share one binding, so the panel shows it
+      // once in the header instead of per cell. `modelDisplayName` falls back
+      // to the alias itself when the entry is unknown (e.g. the synthesized
+      // `__secondary__` derived entry is missing).
+      progress.setModelDisplay(
         modelDisplayName(event.model, this.host.state.appState.availableModels[event.model]),
       );
+      const effortDisplay = this.subagentEffortDisplay(event.thinkingEffort);
+      if (effortDisplay !== undefined) progress.setEffortDisplay(effortDisplay);
     }
   }
 

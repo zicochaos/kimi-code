@@ -20,7 +20,7 @@ describe('formatBackgroundAgentTranscript', () => {
     });
 
     expect(status.headline).toBe('coder agent (GLM 5.2) started in background');
-    expect(status.detail).toBe('Implement the fix');
+    expect(status.detail).toBe('GLM 5.2 · Implement the fix');
   });
 
   it('falls back to the plain headline when the model is unknown', () => {

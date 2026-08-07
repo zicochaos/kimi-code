@@ -170,7 +170,7 @@ describe('AgentSwarmProgressComponent', () => {
   it('shows the bound model display name in the header', () => {
     const component = createComponent();
 
-    component.setMemberModel('agent-1', 'kimi-k2-thinking');
+    component.setModelDisplay('kimi-k2-thinking');
     const lines = renderLines(component);
     const headerLine = lines.find((line) => line.includes('Agent Swarm'));
 
@@ -178,26 +178,16 @@ describe('AgentSwarmProgressComponent', () => {
     expect(headerLine).toContain('Review changed files ─ kimi-k2-thinking');
   });
 
-  it('shows the header model while every reported member agrees', () => {
+  it('keeps the first reported model when later status updates differ', () => {
     const component = createComponent();
 
-    component.setMemberModel('agent-1', 'kimi-k2-thinking');
-    component.setMemberModel('agent-2', 'kimi-k2-thinking');
+    component.setModelDisplay('kimi-k2-thinking');
+    component.setModelDisplay('other-model');
+    component.setModelDisplay('');
 
     const output = renderText(component);
 
     expect(output).toContain('kimi-k2-thinking');
-  });
-
-  it('omits the header model when members report different bindings', () => {
-    const component = createComponent();
-
-    component.setMemberModel('agent-1', 'kimi-k2-thinking');
-    component.setMemberModel('agent-2', 'other-model');
-
-    const output = renderText(component);
-
-    expect(output).not.toContain('kimi-k2-thinking');
     expect(output).not.toContain('other-model');
   });
 

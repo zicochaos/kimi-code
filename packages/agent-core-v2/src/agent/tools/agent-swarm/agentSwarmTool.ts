@@ -269,16 +269,17 @@ export class AgentSwarmTool implements IAgentSwarmTool {
             throw new Error(preflight.error.replace(/^subagent error: /, ''));
           }
         }
-        binding =
-          args.model !== undefined && !isSubagentModelChoiceToken(args.model)
-            ? { model: args.model }
-            : resolveSubagentBinding(
-                this.config,
-                this.flags,
-                { modelAlias: own.modelAlias, thinkingLevel: own.thinkingLevel },
-                (args.model as SubagentModelChoice | undefined) ??
-                  targetProfile.modelPreference,
-              );
+        if (args.model !== undefined && !isSubagentModelChoiceToken(args.model)) {
+          binding = { model: args.model };
+        } else {
+          const resolved = resolveSubagentBinding(
+            this.config,
+            this.flags,
+            { modelAlias: own.modelAlias, thinkingLevel: own.thinkingLevel },
+            (args.model as SubagentModelChoice | undefined) ?? targetProfile.modelPreference,
+          );
+          binding = { model: resolved.model, thinking: resolved.thinking };
+        }
       }
     }
     const timeoutMs = resolveSubagentTimeoutMs(this.config);

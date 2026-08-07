@@ -190,7 +190,8 @@ export class AgentSwarmProgressComponent implements Component {
   private description: string;
   private readonly requestRender: (() => void) | undefined;
   private readonly availableGridHeight: (() => number | undefined) | undefined;
-  private readonly memberModels = new Map<string, string>();
+  private modelDisplay = '';
+  private effortDisplay = '';
   private inputComplete = false;
   private failed = false;
   private aborted = false;
@@ -226,22 +227,23 @@ export class AgentSwarmProgressComponent implements Component {
   }
 
   /**
-   * Record a member's bound model (from its status update). The header shows
-   * the model only while every reported member agrees — mixed bindings
-   * (e.g. resumed agents that kept an older binding alongside freshly spawned
-   * ones) leave the header without a model rather than attributing one
-   * member's model to the whole swarm.
+   * Show the bound model once in the header. Every swarm member binds to the
+   * same model, so the first child status update wins and later ones (e.g.
+   * from resumed agents that kept a different binding) do not churn it.
    */
-  setMemberModel(agentId: string, modelDisplay: string): void {
-    if (modelDisplay.length === 0) return;
-    this.memberModels.set(agentId, modelDisplay);
+  setModelDisplay(modelDisplay: string): void {
+    if (this.modelDisplay.length > 0 || modelDisplay.length === 0) return;
+    this.modelDisplay = modelDisplay;
   }
 
-  private headerModelDisplay(): string {
-    const models = [...this.memberModels.values()];
-    const first = models[0];
-    if (first === undefined) return '';
-    return models.every((model) => model === first) ? first : '';
+  /**
+   * Show the thinking effort next to the model, same first-wins rule. Only
+   * ever called with a concrete level (the handler filters the boolean
+   * states), so its presence already implies a real effort tier.
+   */
+  setEffortDisplay(effortDisplay: string): void {
+    if (this.effortDisplay.length > 0 || effortDisplay.length === 0) return;
+    this.effortDisplay = effortDisplay;
   }
 
   markToolCallEnded(): void {
@@ -501,10 +503,13 @@ export class AgentSwarmProgressComponent implements Component {
       this.description.length > 0
         ? chalk.hex(this.colors.primary)(' ─ ') + chalk.hex(this.colors.text)(this.description)
         : '';
-    const modelDisplay = this.headerModelDisplay();
+    const modelText =
+      this.effortDisplay.length > 0
+        ? `${this.modelDisplay} · ${this.effortDisplay}`
+        : this.modelDisplay;
     const model =
-      modelDisplay.length > 0
-        ? chalk.hex(this.colors.primary)(' ─ ') + chalk.hex(this.colors.textDim)(modelDisplay)
+      modelText.length > 0
+        ? chalk.hex(this.colors.primary)(' ─ ') + chalk.hex(this.colors.textDim)(modelText)
         : '';
     const prefixText = '─ ';
     const labelWidth = Math.max(1, width - visibleWidth(prefixText) - 1);
