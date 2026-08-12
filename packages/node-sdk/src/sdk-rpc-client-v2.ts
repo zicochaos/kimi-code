@@ -234,6 +234,7 @@ import {
   type Scope,
   type SecondaryModelConfig,
   type ServicesAccessor,
+  type SessionSummary as V2SessionSummary,
 } from '@moonshot-ai/agent-core-v2';
 import type { AgentHandle, Klient } from '@moonshot-ai/klient';
 import { createKlient } from '@moonshot-ai/klient/memory';
@@ -300,6 +301,7 @@ import type {
   SessionPlan,
   SessionStatus,
   SessionSummary,
+  SessionSummaryPage,
   SessionUsage,
   SkillSummary,
   TelemetryClient,
@@ -483,6 +485,13 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
 
   async ensureConfigFile(): Promise<void> {
     await ensureConfigFile(this.configPath);
+    // Surface a missing Git Bash early, before the TUI starts. The wait is
+    // Windows-only: the failure cannot happen on POSIX, and `ready` also
+    // covers the login-shell PATH enrichment, which spawns the user's login
+    // shell (5s timeout) — config-only commands must not block on that.
+    if (process.platform === 'win32') {
+      await this.app.accessor.get(IHostEnvironment).ready;
+    }
   }
 
   async close(): Promise<void> {
@@ -991,50 +1000,92 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   }
 
   override async listSessions(input: ListSessionsOptions = {}): Promise<readonly SessionSummary[]> {
+    // Full-set semantics: drain keyset pages until the listing is exhausted
+    // (an unpaged query currently answers in one page, but a backend may cap
+    // it — never silently truncate the unpaged contract).
+    const all: SessionSummary[] = [];
+    let before: string | undefined;
+    for (;;) {
+      const page = await this.listSessionsPage({
+        workDir: input.workDir,
+        sessionId: input.sessionId,
+        before,
+      });
+      all.push(...page.items);
+      if (page.nextCursor === undefined) return all;
+      before = page.nextCursor;
+    }
+  }
+
+  override async listSessionsPage(input: ListSessionsOptions = {}): Promise<SessionSummaryPage> {
     // v1 rejects an empty workDir and bucket-filters by the normalized path;
     // the v2 index filters by workspace-id set instead.
     const workspaceIds =
       input.workDir === undefined
         ? undefined
         : await this.workspaceIdsFor(normalizeRequiredWorkDir('listSessions', input.workDir));
-    const page = await this.klient.global.sessions.list({
-      workspaceIds,
-      sessionId: input.sessionId,
-    });
-    const bootstrapService = this.engineAccessor.get(IBootstrapService);
     const workspacesById = new Map(
       (await this.klient.global.workspaces.list()).map((workspace) => [workspace.id, workspace]),
     );
-    const summaries: SessionSummary[] = [];
-    for (const item of page.items) {
-      const workDir = item.cwd ?? workspacesById.get(item.workspaceId)?.root;
-      // A session whose workDir is unrecoverable (corrupt metadata, deleted
-      // workspace) cannot be resumed on either engine; v1's store never lists
-      // one in the first place, so drop it here too.
-      if (workDir === undefined) continue;
-      // A live session reports its own outcome; the index may still carry a
-      // stale one while the mirror's clear is queued (a fresh turn just
-      // started after a failure).
-      const liveHandle = getLiveSessionById(this.engineAccessor, item.id);
-      const effectiveItem =
-        liveHandle === undefined
-          ? item
-          : {
-              ...item,
-              lastTurnReason: liveHandle.accessor.get(ISessionActivityView).state().lastTurnReason,
-            };
-      summaries.push(
-        v2SummaryToSessionSummary(effectiveItem, {
-          workDir,
-          sessionDir: sessionDirOf(
-            bootstrapService.homeDir,
-            workspacePersistenceScope(bootstrapService.scope('sessions'), item.workspaceId),
-            item.id,
-          ),
-        }),
-      );
+    const collected: SessionSummary[] = [];
+    let before = input.before;
+    // Entries dropped by the mapping (unrecoverable workDir) shrink the page;
+    // keep pulling keyset pages until the requested size is filled so callers
+    // never see a short or empty page that still carries a cursor.
+    for (;;) {
+      const remaining = input.limit === undefined ? undefined : input.limit - collected.length;
+      if (remaining !== undefined && remaining <= 0) break;
+      const page = await this.klient.global.sessions.list({
+        workspaceIds,
+        sessionId: input.sessionId,
+        limit: remaining,
+        before,
+      });
+      if (page.items.length === 0) return { items: collected, nextCursor: undefined };
+      for (const item of page.items) {
+        const summary = this.mapIndexSummary(item, workspacesById);
+        if (summary !== undefined) collected.push(summary);
+      }
+      if (page.nextCursor === undefined) return { items: collected, nextCursor: undefined };
+      before = page.nextCursor;
+      if (input.limit === undefined) return { items: collected, nextCursor: before };
     }
-    return summaries;
+    return { items: collected, nextCursor: before };
+  }
+
+  /**
+   * Map one v2 index summary to the v1 wire shape, resolving the filesystem
+   * facts the index does not carry. Returns `undefined` when the session's
+   * workDir is unrecoverable (corrupt metadata, deleted workspace): such a
+   * session cannot be resumed on either engine, and v1's store never lists
+   * one in the first place.
+   */
+  private mapIndexSummary(
+    item: V2SessionSummary,
+    workspacesById: ReadonlyMap<string, { readonly root: string }>,
+  ): SessionSummary | undefined {
+    const workDir = item.cwd ?? workspacesById.get(item.workspaceId)?.root;
+    if (workDir === undefined) return undefined;
+    // A live session reports its own outcome; the index may still carry a
+    // stale one while the mirror's clear is queued (a fresh turn just
+    // started after a failure).
+    const liveHandle = getLiveSessionById(this.engineAccessor, item.id);
+    const effectiveItem =
+      liveHandle === undefined
+        ? item
+        : {
+            ...item,
+            lastTurnReason: liveHandle.accessor.get(ISessionActivityView).state().lastTurnReason,
+          };
+    const bootstrapService = this.engineAccessor.get(IBootstrapService);
+    return v2SummaryToSessionSummary(effectiveItem, {
+      workDir,
+      sessionDir: sessionDirOf(
+        bootstrapService.homeDir,
+        workspacePersistenceScope(bootstrapService.scope('sessions'), item.workspaceId),
+        item.id,
+      ),
+    });
   }
 
   /**
@@ -1622,12 +1673,10 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   }
 
   /**
-   * Facade (`agentRPCService.steer`). Mid-turn steers match v1 (the input
-   * joins the running turn). The idle-session case diverges by design and is
-   * pinned in the parity tests: v1 launches a fresh turn off a steer and
-   * updates title/lastPrompt like a prompt; v2's enqueue launches the turn
-   * first, so the follow-up `steer()` finds nothing pending and rejects with
-   * `prompt.not_found` — and the v2 RPC path never touches the metadata.
+   * Facade (`agentRPCService.steer`). Matches v1 on both paths: mid-turn
+   * steers join the running turn, and an idle-session steer degrades to
+   * launching a fresh turn (the enqueue launches it directly) while
+   * title/lastPrompt are updated like a prompt's.
    */
   override async steer(input: SessionPromptRpcInput): Promise<void> {
     const agent = await this.agentFacade(input.sessionId);
@@ -2218,11 +2267,20 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     options: { readonly cwd?: string } = {},
   ): Promise<McpTestResult> {
     const server = await this.globalMcpConfig.get(name);
-    const config = mcpConfigWithoutName(server);
+    return this.withGlobalMcpServerProbe(server, options.cwd, (manager) =>
+      standaloneMcpTestResult(server.name, manager),
+    );
+  }
+
+  private async withGlobalMcpServerProbe<T>(
+    server: McpServerConfig,
+    cwd: string | undefined,
+    inspect: (manager: McpConnectionManager) => T,
+  ): Promise<T> {
     await this.configReady;
     const section = this.engineAccessor.get(IConfigService).get<McpSection | undefined>(MCP_SECTION);
     const manager = new McpConnectionManager({
-      stdioCwd: options.cwd,
+      stdioCwd: cwd,
       oauthService: await this.globalMcpOAuthService(),
       resolveClientName: () => this.resolveMcpClientName(),
       resolveDefaultTimeouts: () => ({
@@ -2231,8 +2289,8 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       }),
     });
     try {
-      await manager.connectAll({ [server.name]: config });
-      return standaloneMcpTestResult(server.name, manager);
+      await manager.connectAll({ [server.name]: mcpConfigWithoutName(server) });
+      return inspect(manager);
     } finally {
       await manager.shutdown();
     }
@@ -2244,10 +2302,16 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   ): Promise<GlobalMcpServerAuthState> {
     if (server.transport === 'stdio') return 'not-applicable';
     if (server.bearerTokenEnvVar !== undefined) return 'bearer-token';
-    if (server.auth !== 'oauth') return 'not-applicable';
-    return (await oauth.hasTokens(server.name, server.url))
-      ? 'oauth-authorized'
-      : 'oauth-required';
+    // Keep status classification aligned with the existing connection manager:
+    // unmarked static headers are not treated as OAuth credentials.
+    if (server.headers !== undefined && server.auth !== 'oauth') return 'not-applicable';
+    if (server.transport !== 'http' && server.auth !== 'oauth') return 'not-applicable';
+    if (await oauth.hasTokens(server.name, server.url)) return 'oauth-authorized';
+    if (server.auth === 'oauth') return 'oauth-required';
+
+    return this.withGlobalMcpServerProbe(server, undefined, (manager) =>
+      manager.get(server.name)?.status === 'needs-auth' ? 'oauth-required' : 'not-applicable',
+    );
   }
 
   /**

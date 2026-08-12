@@ -11,7 +11,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createKimiHarnessV2,
@@ -26,13 +26,35 @@ import { foldAgentWireReplay } from '#/v2/resume-replay';
 import {
   drainQueryStoreDisposals,
   drainSessionIndexMirror,
+  HostProcessError,
   IHostRequestHeaders,
+  OsProcessErrors,
 } from '@moonshot-ai/agent-core-v2';
 
 import { McpOAuthService } from '../../agent-core/src/mcp/oauth/service';
 
 import { TEST_IDENTITY } from './test-identity';
+import { startMcpAuthStatusServer } from './mcp-auth-status-server';
 import { recordingTelemetry, type TelemetryRecord } from './telemetry';
+
+const hostEnvProbe = vi.hoisted(() => ({ failWithMissingShell: false }));
+
+vi.mock('@moonshot-ai/agent-core-v2/_base/execEnv/environmentProbe', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('@moonshot-ai/agent-core-v2/_base/execEnv/environmentProbe')
+  >();
+  return {
+    ...actual,
+    probeHostEnvironmentFromNode: () =>
+      hostEnvProbe.failWithMissingShell
+        ? Promise.reject(
+            new actual.ProbeShellNotFoundError('Git Bash missing (stubbed)', [
+              'C:\\Program Files\\Git\\bin\\bash.exe',
+            ]),
+          )
+        : actual.probeHostEnvironmentFromNode(),
+  };
+});
 
 const tempDirs: string[] = [];
 
@@ -46,6 +68,16 @@ afterEach(async () => {
   }
 });
 
+function stubProcessPlatform(platform: NodeJS.Platform): () => void {
+  const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  return () => {
+    if (descriptor !== undefined) {
+      Object.defineProperty(process, 'platform', descriptor);
+    }
+  };
+}
+
 async function makeHarness(): Promise<{ harness: KimiHarness; homeDir: string }> {
   const homeDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-'));
   tempDirs.push(homeDir);
@@ -56,18 +88,25 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
   it('reports global MCP authorization from the persisted v2 credential store', async () => {
     const homeDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-'));
     tempDirs.push(homeDir);
+    const statusServer = await startMcpAuthStatusServer();
     const authorizedUrl = 'https://authorized.example.test/mcp';
     const requiredUrl = 'https://required.example.test/mcp';
     const externalOAuth = new McpOAuthService({ kimiHomeDir: homeDir });
     externalOAuth
       .getProvider('oauth-authorized', authorizedUrl)
       .saveTokens({ access_token: 'test-access-token', token_type: 'Bearer' });
+    externalOAuth
+      .getProvider('sse', statusServer.oauthUrl)
+      .saveTokens({ access_token: 'stale-sse-token', token_type: 'Bearer' });
     await writeFile(
       join(homeDir, 'mcp.json'),
       JSON.stringify({
         mcpServers: {
           stdio: { command: 'local-command' },
-          plain: { transport: 'http', url: 'https://plain.example.test/mcp' },
+          plain: { transport: 'http', url: statusServer.plainUrl },
+          detected: { transport: 'http', url: statusServer.oauthUrl },
+          sse: { transport: 'sse', url: statusServer.oauthUrl },
+          'sse-oauth': { transport: 'sse', url: statusServer.oauthUrl, auth: 'oauth' },
           bearer: {
             transport: 'http',
             url: 'https://bearer.example.test/mcp',
@@ -93,6 +132,9 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
       await expect(harness.listMcpServerAuthStatuses()).resolves.toEqual([
         { name: 'stdio', authStatus: 'not-applicable' },
         { name: 'plain', authStatus: 'not-applicable' },
+        { name: 'detected', authStatus: 'oauth-required' },
+        { name: 'sse', authStatus: 'not-applicable' },
+        { name: 'sse-oauth', authStatus: 'oauth-required' },
         { name: 'bearer', authStatus: 'bearer-token' },
         { name: 'oauth-required', authStatus: 'oauth-required' },
         { name: 'oauth-authorized', authStatus: 'oauth-authorized' },
@@ -106,14 +148,18 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
       await expect(harness.listMcpServerAuthStatuses()).resolves.toEqual([
         { name: 'stdio', authStatus: 'not-applicable' },
         { name: 'plain', authStatus: 'not-applicable' },
+        { name: 'detected', authStatus: 'oauth-required' },
+        { name: 'sse', authStatus: 'not-applicable' },
+        { name: 'sse-oauth', authStatus: 'oauth-required' },
         { name: 'bearer', authStatus: 'bearer-token' },
         { name: 'oauth-required', authStatus: 'oauth-authorized' },
         { name: 'oauth-authorized', authStatus: 'oauth-required' },
       ]);
     } finally {
       await harness.close();
+      await statusServer.close();
     }
-  });
+  }, 15_000);
 
   it('seeds the host request headers (User-Agent + X-Msh-*) into the engine', async () => {
     const homeDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-'));
@@ -129,6 +175,45 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
       expect(headers['X-Msh-Device-Id']).toBeTruthy();
     } finally {
       await client.close();
+    }
+  });
+
+  it('surfaces a missing Git Bash probe failure during ensureConfigFile on Windows', async () => {
+    hostEnvProbe.failWithMissingShell = true;
+    const restorePlatform = stubProcessPlatform('win32');
+    try {
+      const homeDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-'));
+      tempDirs.push(homeDir);
+      const harness = createKimiHarnessV2({ homeDir, identity: TEST_IDENTITY });
+      try {
+        await expect(harness.ensureConfigFile()).rejects.toBeInstanceOf(HostProcessError);
+        await expect(harness.ensureConfigFile()).rejects.toMatchObject({
+          code: OsProcessErrors.codes.SHELL_GIT_BASH_NOT_FOUND,
+        });
+      } finally {
+        await harness.close();
+      }
+    } finally {
+      hostEnvProbe.failWithMissingShell = false;
+      restorePlatform();
+    }
+  });
+
+  it('does not block ensureConfigFile on the host environment probe on POSIX', async () => {
+    hostEnvProbe.failWithMissingShell = true;
+    const restorePlatform = stubProcessPlatform('darwin');
+    try {
+      const homeDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-'));
+      tempDirs.push(homeDir);
+      const harness = createKimiHarnessV2({ homeDir, identity: TEST_IDENTITY });
+      try {
+        await expect(harness.ensureConfigFile()).resolves.toBeUndefined();
+      } finally {
+        await harness.close();
+      }
+    } finally {
+      hostEnvProbe.failWithMissingShell = false;
+      restorePlatform();
     }
   });
 

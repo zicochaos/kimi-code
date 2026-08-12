@@ -2,12 +2,12 @@
 
 This file tracks **what diverges from upstream** (`MoonshotAI/kimi-code`) so rebases do not drop local product behavior. Update it whenever a fork-only feature is added, restored, or abandoned.
 
-**Upstream base we track:** `@moonshot-ai/kimi-code@0.34.0` / `main@origin` (release 2026-08-06; remote `origin` = `MoonshotAI/kimi-code`, `fork` = this fork)
-**Local main tip:** see `git log main` (0.34.0 port lives on merge branch `merge/upstream-0.34.0` until integrated)
+**Upstream base we track:** `@moonshot-ai/kimi-code@0.35.0` (release 2026-08-12; remote `upstream` = `MoonshotAI/kimi-code`, `origin` = this fork `zicochaos/kimi-code`)
+**Local main tip:** see `git log main` (0.35.0 port lives on merge branch `merge/upstream-0.35.0` until integrated)
 
 ## How to merge a new upstream without losing options
 
-1. `git fetch origin --tags`
+1. `git fetch upstream --tags`
 2. Backup: `git tag backup/pre-<ver>-port main`
 3. Create a merge branch (`git switch -c merge/upstream-<ver> main`) and merge the upstream tag; do not rebase the merge-heavy fork history.
 4. Prefer upstream implementations where they provide the same or better behavior, then restore only the missing contracts listed below.
@@ -32,13 +32,15 @@ rg -n "disabled_skills|persist_default_model|agents_md_expand_includes|formatTer
 | `persist_default_model` | `true` | When `false`, model changes stay process-local and do not rewrite managed `config.toml` model settings | **v2 only since the 0.33.0 port:** `packages/agent-core-v2/src/app/kosongConfig/configSection.ts`, `packages/agent-core-v2/src/app/kosongConfig/kosongConfigService.ts` |
 | `agents_md_expand_includes` | `false` | When `true`, standalone `@path` lines in `AGENTS.md` are expanded at system-prompt assembly time (depth ≤ 5; missing/cycle/empty → HTML comments) | **v2 only since the 0.33.0 port:** agent-core-v2 profile context loader + `agentsMdExpandIncludes` config section |
 
-### Engine posture (0.33.0 / 0.34.0)
+### Engine posture (0.33.0 / 0.34.0 / 0.35.0)
 
 Upstream `0.33.0` (`#2627`) makes **agent-core-v2 the default engine** for every CLI surface; v1 (`packages/agent-core`) is legacy behind `KIMI_CODE_LEGACY_FLAG=1` and receives maintenance fixes only. The 0.33.0 port therefore **dropped all v1-side fork features** (v1 `disabled_skills`, v1 `persist_default_model`, v1 include expansion, retired v1 exact-alias selection). The single v1-side keep is the wire-protocol 1.5 migration (`packages/agent-core/src/agent/records/migration/v1.5.ts`) so the legacy engine can still resume sessions written by v2 — upstream v1 remains at 1.4.
 
 Upstream `0.33.0` (`#2599`) also **deleted `apps/kimi-web`** (web UI source moved to the code-app repo; this repo ships a prebuilt `apps/kimi-code/dist-web`). The fork dropped the app and all its fork-only web UI features (managed quota sidebar card, web-side `disabled_skills` listing); the kap-server contracts below remain.
 
 Upstream `0.34.0` highlights absorbed by this port: cache-expiry hint dialog, Windows Computer Use, `/api/v2/sessions` (v1 envelope), full-text search index isolation (minidb), L3 unit layer + Feature seam (plan mode moved to `src/features/plan/**`), MCP tombstoning, UTF-16 file reading, and upstream's own subagent bound-model + thinking-effort surfacing (`#2679`) — which **subsumes the fork's subagent-model display plumbing** (the port adopts upstream's `model`/`thinkingEffort` fields and `subagentDisplayModel` normalization; the fork keeps only its exact-alias selection feature and the `model` field on `subagent.spawned`).
+
+Upstream `0.35.0` highlights absorbed by this port: live background subagent activity in `/tasks` (`#2816`), paginated `/sessions` picker + SDK `listSessionsPage` (`#2826`), step-retry progress indicator (`#2825`), full-text search index isolated into a worker host (`#2701`; `search_worker` default ON, `persistence_minidb_readmodel` flipped to default ON), WebSocket heartbeat for proxy idle timeouts (`#2813`), global MCP auth status in the SDK (`#2706`/`#2731`), `btw`/`debugEvents` Feature units, and a prebuilt `dist-web` sync (`#2840`). `#2837` removes `Agent`/`AgentSwarm` from the builtin coder profile on both engines — the default coder can no longer spawn nested subagents unless a custom profile lists the tools; the fork's `subagent-model-selection` is unaffected (the tools, schemas, and exact-alias plumbing remain) but is reachable only from profiles that expose them. The port's single merge conflict was `apps/kimi-code/src/tui/kimi-tui.ts` (upstream `#2816`/`#2826` rework), resolved by keeping upstream's structure and re-applying `formatTerminalTitle` + the managed-quota refresh hooks. The port also deleted the orphaned `apps/kimi-web` leftovers (`QuotaCard.vue`, `managedQuota.ts`, `managedQuota.test.ts`).
 
 ### Experimental
 
@@ -70,7 +72,7 @@ Upstream `0.34.0` highlights absorbed by this port: cache-expiry hint dialog, Wi
 | Workspace skills honor `disabled_skills` | Session-less listing matches the session skill catalog (kap-server resolves the Workspace-scope skill catalog, not an ad-hoc composition) |
 | Activate disabled skill → `40912` | Disabled activation is a user-facing skill error rather than internal `50001` |
 
-There is intentionally no fork-only `/api/v1/usages` route, and since the 0.33.0 port no fork web UI: upstream removed `apps/kimi-web`, so the managed quota sidebar card was dropped with it. If web quota UI is wanted again, it belongs in the code-app repo that now owns the web source.
+There is intentionally no fork-only `/api/v1/usages` route, and since the 0.33.0 port no fork web UI: upstream removed `apps/kimi-web`, so the managed quota sidebar card was dropped with it. If web quota UI is wanted again, it belongs in the code-app repo that now owns the web source. (Residual fork-only leftovers — `QuotaCard.vue`, `managedQuota.ts`, `managedQuota.test.ts` — lingered after the 0.33.0 port; the 0.35.0 port deleted them.)
 
 ## Upstream contributions from this fork
 
@@ -124,8 +126,10 @@ If something disappears after syncing upstream, compare against `backup/pre-*` a
 | Branch | Meaning |
 | --- | --- |
 | `main` | Shipping fork tip |
-| `merge/upstream-0.34.0` | 0.34.0 port (merge of `main@origin` at `@moonshot-ai/kimi-code@0.34.0`); integrate into `main` after verification |
+| `merge/upstream-0.35.0` | 0.35.0 port (merge of tag `@moonshot-ai/kimi-code@0.35.0`); integrate into `main` after verification |
+| `merge/upstream-0.34.0` | 0.34.0 port (integrated) |
 | `merge/upstream-0.33.0` | 0.33.0 port (integrated) |
+| `backup/pre-0.35.0-port` (tag) | Pre-port local tip at `bc2350063` (last state on upstream 0.34.0) |
 | `backup/pre-0.34.0-port` (tag) | Pre-port local tip at `a1054918b` (last state on upstream 0.33.0) |
 | `backup/pre-jj-migration` (tag) | Same tip — snapshot from the jj→git migration on 2026-08-07. The `.jj` store was archived out of the repo; this repo is now plain git |
 | `backup/pre-0.33.0-port` | Pre-port local tip at `174cce520ceaeb2112b3e671872db356f6732235` (last state on upstream 0.31.1) |
