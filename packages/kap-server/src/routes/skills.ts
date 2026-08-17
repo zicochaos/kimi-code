@@ -35,12 +35,12 @@
  *     on demand through `IWorkspaceLifecycleService`.
  *   - activate     → `IAgentSkillService` (Agent scope, on the `main` agent) —
  *                    renders the skill prompt and starts a turn with a
- *                    `skill_activation` origin. The returned `Turn` handle is
+ *                    `skill_activation` origin. The returned `{turn_id}` is
  *                    discarded; clients follow progress via the `skill.activated`
  *                    + `turn.*` events emitted by the service on the WS stream.
- *                    The edge then applies the prompt-metadata update
- *                    (`applyPromptMetadataUpdate`) so a first `/<skill>`
- *                    message titles the session, matching the native RPC path.
+ *                    The engine applies the prompt-metadata update itself
+ *                    (main agent only) so a first `/<skill>`
+ *                    message titles the session, matching the native prompt path.
  *                    Optional `attachments` (image/video/file parts, same wire
  *                    shape as prompt content) run through the shared prompt
  *                    media pipeline (`lib/promptMedia.ts`) and are appended to
@@ -75,11 +75,9 @@ import {
   ErrorCodes,
   IAgentSkillService,
   IBootstrapService,
-  IEventService,
   IFileService,
   ISessionContext,
   ISessionIndex,
-  ISessionMetadata,
   ISessionSkillCatalog,
   ITelemetryService,
   IWorkspaceLifecycleService,
@@ -88,8 +86,6 @@ import {
   isError2,
   isUserActivatableSkillType,
   resumeSessionById,
-  applyPromptMetadataUpdate,
-  promptMetadataTextFromSkill,
   sessionMediaOriginalsDir,
   type ContentPart,
   type ISessionScopeHandle,
@@ -334,19 +330,12 @@ export function registerSkillsRoutes(app: SkillsRouteHost, core: Scope): void {
           attachmentParts.push(...contentToCoreParts(resolvedContent));
         }
         const agent = await ensureMainAgent(resolved.handle);
+        // The engine applies the prompt-metadata update itself (main agent
+        // only), so a first `/<skill>` message titles the session (same as
+        // routes/prompts.ts).
         await agent.accessor
           .get(IAgentSkillService)
           .activate({ name: parsed.id, args: req.body.args, content: attachmentParts });
-        // Keep the easy-title behavior of the native RPC / TUI path: a first
-        // `/<skill>` message titles the session (same as routes/prompts.ts).
-        await applyPromptMetadataUpdate(
-          {
-            metadata: resolved.handle.accessor.get(ISessionMetadata),
-            eventService: core.accessor.get(IEventService),
-            sessionId: session_id,
-          },
-          promptMetadataTextFromSkill({ name: parsed.id, args: req.body.args }),
-        );
         requestLog(req)?.info({ session_id, skill_name: parsed.id }, 'skill activated');
         reply.send(okEnvelope({ activated: true, skill_name: parsed.id }, req.id));
       } catch (err) {

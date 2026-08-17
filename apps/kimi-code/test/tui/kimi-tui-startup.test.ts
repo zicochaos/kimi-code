@@ -441,6 +441,24 @@ describe('KimiTUI startup', () => {
     });
   });
 
+  it('mounts the docked fullscreen layout when KIMI_CODE_TUI_FULL_SCREEN=1', async () => {
+    const harness = makeHarness(makeSession());
+    vi.stubEnv('KIMI_CODE_TUI_FULL_SCREEN', '1');
+    const driver = makeDriver(harness, { ...makeStartupInput(), engineV2: true });
+    vi.unstubAllEnvs();
+
+    // buildLayout() runs in the constructor: fullscreen keeps the root
+    // children list empty and mounts the layout root instead.
+    expect(driver.state.ui.mode).toBe('fullscreen');
+    expect(driver.state.ui.children).toHaveLength(0);
+
+    await expect(driver.init()).resolves.toBe(false);
+    (driver as unknown as { mountFooter(): void }).mountFooter();
+
+    // Dock = 5 chrome containers + footer wrap, below the transcript viewport.
+    expect(driver.state.dockContainer?.children).toHaveLength(6);
+  });
+
   it('shows a session-less notice on v2 startup', async () => {
     const harness = makeHarness(makeSession());
     const driver = makeDriver(harness, { ...makeStartupInput(), engineV2: true });
@@ -2200,7 +2218,7 @@ describe('KimiTUI startup', () => {
     // later startup steps spawned child processes in an untrusted directory.
     const getWorkspaceTrustInfo = vi.fn(async () => ({
       trusted: true,
-      gatedMcpServers: [] as string[],
+      gatedMcpServers: [],
     }));
     const harness = makeHarness(makeSession(), { getWorkspaceTrustInfo });
     const driver = makeDriver(harness, {
@@ -2230,7 +2248,7 @@ describe('KimiTUI startup', () => {
   it('prompts for workspace trust before migrating an untrusted workspace', async () => {
     const getWorkspaceTrustInfo = vi.fn(async () => ({
       trusted: false,
-      gatedMcpServers: [] as string[],
+      gatedMcpServers: [],
     }));
     const trustWorkspace = vi.fn(async () => {});
     const harness = makeHarness(makeSession(), { getWorkspaceTrustInfo, trustWorkspace });
@@ -2256,7 +2274,8 @@ describe('KimiTUI startup', () => {
     await vi.waitFor(() => {
       expect(mountSpy).toHaveBeenCalled();
     });
-    // Choose the default "Trust this folder" option with Enter.
+    // Move from the safe default to the explicit trust choice, then confirm.
+    mountSpy.mock.calls[0]![0].handleInput('\u001B[A');
     mountSpy.mock.calls[0]![0].handleInput('\r');
     await startPromise;
 

@@ -1,9 +1,10 @@
 /**
  * `/api/v1/debug` channel registry — the set of Services exposed over the
- * wire: the ENTIRE scoped DI registry (no whitelist), plus any Service
- * resolvable by decorator name as a fallback, so runtime-contributed units
- * (Feature `contributeService`, which bypasses the static scoped registry)
- * stay callable.
+ * wire: the ENTIRE scoped DI registry (no whitelist), plus Services
+ * runtime-contributed through the Feature `contributeService` seam (the
+ * contributed-service table in `features/featureRegistry`), which bypasses
+ * the static registry. Kernel tokens that were never registered either way
+ * stay unreachable.
  *
  * In VS Code's `registerChannel` model a Service is registered once, keyed by
  * its decorator id (the public channel name), and from then on all of its
@@ -15,11 +16,11 @@
 import {
   Disposable,
   getScopedServiceDescriptors,
+  IFeatureManager,
   LifecycleScope,
-  lookupServiceDecorator,
 } from '@moonshot-ai/agent-core-v2';
 
-import type { ScopedEntry, ServiceIdentifier } from '@moonshot-ai/agent-core-v2';
+import type { Scope, ScopedEntry, ServiceIdentifier } from '@moonshot-ai/agent-core-v2';
 
 export interface ChannelMethodDescriptor {
   readonly name: string;
@@ -86,8 +87,17 @@ function scopedServiceNameIndex(): Map<string, ServiceIdentifier<unknown>> {
 }
 
 /** Resolve a wire name to its `ServiceIdentifier` anywhere in the DI registry. */
-export function resolveAnyScopedServiceId(name: string): ServiceIdentifier<unknown> | undefined {
-  return scopedServiceNameIndex().get(name) ?? lookupServiceDecorator(name);
+export function resolveAnyScopedServiceId(
+  core: Scope,
+  name: string,
+): ServiceIdentifier<unknown> | undefined {
+  return (
+    scopedServiceNameIndex().get(name) ??
+    core.accessor
+      .get(IFeatureManager)
+      .contributedServices()
+      .find((entry) => entry.id.toString() === name)?.id
+  );
 }
 
 /**

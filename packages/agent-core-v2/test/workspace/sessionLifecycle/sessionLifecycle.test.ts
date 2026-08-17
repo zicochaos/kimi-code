@@ -15,9 +15,9 @@ import {
 import { type ScopedTestHost, createScopedTestHost, stubPair } from '#/_base/di/test';
 import { Event } from '#/_base/event';
 import { ILogService } from '#/_base/log/log';
-import type { Hooks } from '#/hooks';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { IConfigService } from '#/app/config/config';
+import { IFlagService } from '#/app/flag/flag';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
 import { IHostFileSystem } from '#/os/interface/hostFileSystem';
 import { HostFileSystem } from '#/os/backends/node-local/hostFsService';
@@ -41,7 +41,12 @@ import { IWorkspaceInstructionsService } from '#/workspace/workspaceInstructions
 import { IWorkspaceMcpService } from '#/workspace/workspaceMcp/workspaceMcp';
 import { IAgentPlanService } from '#/features/plan/plan';
 import { ISessionCronService } from '#/session/cron/sessionCronService';
-import { ISessionSecondaryModelWarningService } from '#/session/subagent/secondaryModelWarning';
+import { ISessionSubagentModelsValidationService } from '#/session/subagent/subagentModelsValidation';
+import { SECONDARY_MODEL_FLAG_ID } from '#/session/subagent/flag';
+import { IModelCatalog } from '#/kosong/model/catalog';
+import { IModelService } from '#/kosong/model/model';
+import { IProviderService } from '#/kosong/provider/provider';
+import { stubProviderService } from '../../app/provider/stubs';
 import { ICronTaskPersistence } from '#/app/cron/cronTaskPersistence';
 import { CRON_SESSION_TAG, type CronTask } from '#/app/cron/cronTask';
 import { IWorkspaceLifecycleService } from '#/app/workspaceLifecycle/workspaceLifecycle';
@@ -53,12 +58,11 @@ import { IWorkspaceToolPolicy } from '#/workspace/workspaceToolPolicy/workspaceT
 import { WorkspaceToolPolicyService } from '#/workspace/workspaceToolPolicy/workspaceToolPolicyService';
 import { IAgentActivityView } from '#/agent/activityView/activityView';
 import { ISessionExternalHooksService } from '#/session/externalHooks/externalHooks';
-import {
-  ISessionLifecycleHooks,
-  type SessionLifecycleHookSlots,
-} from '#/session/sessionLifecycleHooks/sessionLifecycleHooks';
 import { ISessionIndexMirror } from '#/app/sessionIndex/sessionIndex';
-import { ISessionMetadata } from '#/session/sessionMetadata/sessionMetadata';
+import {
+  ISessionMetadata,
+  type SessionMetaPatch,
+} from '#/session/sessionMetadata/sessionMetadata';
 import { ISessionToolPolicy } from '#/session/sessionToolPolicy/sessionToolPolicy';
 import { ISessionProcessRunner } from '#/session/process/processRunner';
 import { ISessionIndex, type SessionSummary } from '#/app/sessionIndex/sessionIndex';
@@ -81,6 +85,7 @@ import { ISessionMcpHandle } from '#/session/mcp/sessionMcpHandle';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
 import { Error2, ErrorCodes } from '#/errors';
 import { recordingTelemetry, type TelemetryRecord } from '../../app/telemetry/stubs';
+import { stubFlag } from '../../app/flag/stubs';
 import { stubLog } from '../../_base/log/stubs';
 
 function bootstrapStub(): IBootstrapService {
@@ -125,6 +130,7 @@ function metadataStub(): ISessionMetadata {
     read: () => Promise.resolve({} as never),
     update: () => Promise.resolve(),
     setTitle: () => Promise.resolve(),
+    setGeneratedTitleIfUncustomized: () => Promise.resolve(false),
     setArchived: () => Promise.resolve(),
     registerAgent: () => Promise.resolve(),
   };
@@ -345,6 +351,136 @@ function appendLogStoreStub(): IAppendLogStore {
   };
 }
 
+/**
+ * In-memory wire store for fork tests: `wires` maps `<sessionId>/<agentId>`
+ * to the source records served by `read`; every `rewrite` is captured under
+ * the same key shape so tests can assert exactly what a fork persisted.
+ */
+function wireStoreStub(wires: Readonly<Record<string, readonly unknown[]>>): {
+  readonly store: IAppendLogStore;
+  readonly rewritten: Map<string, unknown[]>;
+} {
+  const rewritten = new Map<string, unknown[]>();
+  const keyOf = (scope: string, key: string): string => {
+    const match = /([^/]+)\/agents\/([^/]+)$/.exec(scope);
+    return match === null ? `${scope}/${key}` : `${match[1]}/${match[2]}`;
+  };
+  const store: IAppendLogStore = {
+    _serviceBrand: undefined,
+    append: () => {},
+    read: <R>(scope: string, key: string): AsyncIterable<R> => {
+      const records = wires[keyOf(scope, key)] ?? [];
+      return (async function* () {
+        for (const record of records) {
+          yield record as R;
+        }
+      })();
+    },
+    rewrite: <R>(scope: string, key: string, records: readonly R[]) => {
+      rewritten.set(keyOf(scope, key), [...records]);
+      return Promise.resolve();
+    },
+    flush: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+    acquire: () => ({ dispose: () => {} }),
+  };
+  return { store, rewritten };
+}
+
+function wireEnvelopeRecord(time: number): Record<string, unknown> {
+  return { type: 'metadata', protocol_version: '1.5', created_at: time };
+}
+
+function turnPromptRecord(text: string, time: number): Record<string, unknown> {
+  return {
+    type: 'turn.prompt',
+    input: [{ type: 'text', text }],
+    origin: { kind: 'user' },
+    time,
+  };
+}
+
+function turnSteerRecord(text: string, time: number): Record<string, unknown> {
+  return {
+    type: 'turn.steer',
+    input: [{ type: 'text', text }],
+    origin: { kind: 'user' },
+    time,
+  };
+}
+
+function userTurnRecord(text: string, time: number): Record<string, unknown> {
+  return {
+    type: 'context.append_message',
+    message: { role: 'user', content: [{ type: 'text', text }] },
+    time,
+  };
+}
+
+function assistantMessageRecord(text: string, time: number): Record<string, unknown> {
+  return {
+    type: 'context.append_message',
+    message: { role: 'assistant', content: [{ type: 'text', text }] },
+    time,
+  };
+}
+
+/** Three user-visible turns on the main agent, each prompt + user + assistant. */
+function threeTurnMainWire(): Record<string, unknown>[] {
+  return [
+    wireEnvelopeRecord(1),
+    turnPromptRecord('first question', 2),
+    userTurnRecord('first question', 3),
+    assistantMessageRecord('first answer', 4),
+    turnPromptRecord('second question', 5),
+    userTurnRecord('second question', 6),
+    assistantMessageRecord('second answer', 7),
+    turnPromptRecord('third question', 8),
+    userTurnRecord('third question', 9),
+    assistantMessageRecord('third answer', 10),
+  ];
+}
+
+function agentHandleStub(agentId: string): IAgentScopeHandle {
+  return {
+    id: agentId,
+    kind: LifecycleScope.Agent,
+    accessor: {
+      get: () => {
+        throw new Error('unexpected agent service access');
+      },
+    },
+    dispose: () => {},
+  } as unknown as IAgentScopeHandle;
+}
+
+/** Agent lifecycle whose `create` resolves and records the created agent ids. */
+function agentLifecycleCreatingStub(created: string[]): IAgentLifecycleService {
+  return {
+    ...agentLifecycleStub(),
+    create: (opts) => {
+      const agentId = opts?.agentId ?? MAIN_AGENT_ID;
+      created.push(agentId);
+      return Promise.resolve(agentHandleStub(agentId));
+    },
+  };
+}
+
+/** Session metadata stub serving a fixed source document and capturing updates. */
+function sessionMetadataStubFor(
+  document: Record<string, unknown>,
+  updates: Array<Record<string, unknown>>,
+): ISessionMetadata {
+  return {
+    ...metadataStub(),
+    read: () => Promise.resolve(document as never),
+    update: (patch) => {
+      updates.push(patch as Record<string, unknown>);
+      return Promise.resolve();
+    },
+  };
+}
+
 function atomicDocumentStoreStub(): IAtomicDocumentStore {
   return {
     _serviceBrand: undefined,
@@ -428,6 +564,33 @@ function configStub(values: Record<string, unknown> = {}): IConfigService {
   } as unknown as IConfigService;
 }
 
+function modelCatalogStub(knownIds: readonly string[] = []): IModelCatalog {
+  return {
+    _serviceBrand: undefined,
+    get: (id: string) => {
+      if (!knownIds.includes(id)) {
+        throw new Error2(
+          ErrorCodes.CONFIG_INVALID,
+          `Model "${id}" is not configured in config.toml.`,
+          { details: { model: id } },
+        );
+      }
+      return { id };
+    },
+  } as unknown as IModelCatalog;
+}
+
+function modelServiceStub(ready: Promise<void> = Promise.resolve()): IModelService {
+  return {
+    _serviceBrand: undefined,
+    ready,
+  } as unknown as IModelService;
+}
+
+function secondaryModelFlagStub(enabled: boolean): IFlagService {
+  return stubFlag((id) => enabled && id === SECONDARY_MODEL_FLAG_ID);
+}
+
 function agentLifecycleCapturingPlanSpy(opts: { mainPreexists?: boolean } = {}): {
   lifecycle: IAgentLifecycleService;
   enter: ReturnType<typeof vi.fn>;
@@ -483,19 +646,19 @@ class RecordingSessionExternalHooksService
 
   constructor(
     @ISessionContext private readonly context: ISessionContext,
-    @ISessionLifecycleHooks hooks: Hooks<SessionLifecycleHookSlots>,
+    @ISessionLifecycleService lifecycle: ISessionLifecycleService,
   ) {
     super();
     this._register(
-      hooks.onDidCreateSession.register('test', async (event, next) => {
+      lifecycle.onDidCreateSession((event) => {
+        if (event.sessionId !== this.context.sessionId) return;
         recordedSessionHookEvents.push(`create:${event.source}:${this.context.sessionId}`);
-        await next();
       }),
     );
     this._register(
-      hooks.onWillCloseSession.register('test', async (event, next) => {
+      lifecycle.onWillCloseSession((event) => {
+        if (event.sessionId !== this.context.sessionId) return;
         recordedSessionHookEvents.push(`close:${event.reason}:${this.context.sessionId}`);
-        await next();
       }),
     );
   }
@@ -599,11 +762,14 @@ describe('SessionLifecycleService', () => {
       stubPair(IAgentLifecycleService, agentLifecycleStub()),
       stubPair(IWorkspaceMcpService, workspaceMcpServiceStub()),
       stubPair(IConfigService, configStub()),
+      stubPair(IModelCatalog, modelCatalogStub()),
+      stubPair(IModelService, modelServiceStub()),
+      stubPair(IProviderService, stubProviderService()),
+      stubPair(IFlagService, secondaryModelFlagStub(false)),
       stubPair(ISessionCronService, { _serviceBrand: undefined } as unknown as ISessionCronService),
-      stubPair(ISessionSecondaryModelWarningService, {
+      stubPair(ISessionSubagentModelsValidationService, {
         _serviceBrand: undefined,
-        getSecondaryModelWarning: () => undefined,
-      } as ISessionSecondaryModelWarningService),
+      } as ISessionSubagentModelsValidationService),
       stubPair(IProjectLocalConfigService, projectLocalConfigStub()),
       stubPair(IHostFsWatchService, {
         _serviceBrand: undefined,
@@ -665,6 +831,157 @@ describe('SessionLifecycleService', () => {
 
     await svc.create({ sessionId: 's2', workDir: '/tmp/proj' });
     expect(svc.get('s2')).toBeDefined();
+  });
+
+  it('rejects create with CONFIG_INVALID for a broken subagent model pool before registering anything', async () => {
+    const svc = await build([
+      stubPair(
+        IConfigService,
+        configStub({ secondaryModel: { models: { 'provider/fast': 'fast and cheap' } } }),
+      ),
+      stubPair(IModelCatalog, modelCatalogStub(['provider/fast'])),
+      stubPair(IFlagService, secondaryModelFlagStub(true)),
+    ]);
+
+    await expect(svc.create({ sessionId: 's-broken', workDir: '/tmp/proj' })).rejects.toMatchObject(
+      {
+        code: ErrorCodes.CONFIG_INVALID,
+        message: expect.stringContaining('[secondary_model].default_model is required'),
+      },
+    );
+    expect(svc.get('s-broken')).toBeUndefined();
+  });
+
+  it('creates a session when the subagent model pool is valid', async () => {
+    const svc = await build([
+      stubPair(
+        IConfigService,
+        configStub({
+          secondaryModel: {
+            defaultModel: 'provider/fast',
+            models: { 'provider/fast': 'fast and cheap' },
+          },
+        }),
+      ),
+      stubPair(IModelCatalog, modelCatalogStub(['provider/fast'])),
+      stubPair(IFlagService, secondaryModelFlagStub(true)),
+    ]);
+
+    const h = await svc.create({ sessionId: 's-pool', workDir: '/tmp/proj' });
+    expect(svc.get('s-pool')).toBe(h);
+  });
+
+  it('waits for the model/provider registries before validating the subagent model pool', async () => {
+    let releaseRegistries!: () => void;
+    const registriesReady = new Promise<void>((resolve) => {
+      releaseRegistries = resolve;
+    });
+    let registriesReleased = false;
+    const coldRegistryCatalog = {
+      _serviceBrand: undefined,
+      get: (id: string) => {
+        if (!registriesReleased) {
+          throw new Error2(
+            ErrorCodes.CONFIG_INVALID,
+            `Model "${id}" is not configured in config.toml.`,
+            { details: { model: id } },
+          );
+        }
+        return { id };
+      },
+    } as unknown as IModelCatalog;
+    const svc = await build([
+      stubPair(
+        IConfigService,
+        configStub({
+          secondaryModel: {
+            defaultModel: 'provider/fast',
+            models: { 'provider/fast': 'fast and cheap' },
+          },
+        }),
+      ),
+      stubPair(IModelCatalog, coldRegistryCatalog),
+      stubPair(IModelService, modelServiceStub(registriesReady)),
+      stubPair(IProviderService, stubProviderService({}, registriesReady)),
+      stubPair(IFlagService, secondaryModelFlagStub(true)),
+    ]);
+
+    // A cold bootstrap can reach create before the kosong registries finish
+    // hydrating: the pre-flight must hold, not fail the valid pool against an
+    // empty registry.
+    let settled = false;
+    const pending = svc.create({ sessionId: 's-race', workDir: '/tmp/proj' }).then((created) => {
+      settled = true;
+      return created;
+    });
+    await tick();
+    expect(settled).toBe(false);
+
+    registriesReleased = true;
+    releaseRegistries();
+    const h = await pending;
+    expect(svc.get('s-race')).toBe(h);
+  });
+
+  it('rejects create with CONFIG_INVALID when force is set without default_model', async () => {
+    const svc = await build([
+      stubPair(IConfigService, configStub({ secondaryModel: { force: true } })),
+      stubPair(IModelCatalog, modelCatalogStub(['provider/fast'])),
+      stubPair(IFlagService, secondaryModelFlagStub(true)),
+    ]);
+
+    await expect(svc.create({ sessionId: 's-force', workDir: '/tmp/proj' })).rejects.toMatchObject(
+      {
+        code: ErrorCodes.CONFIG_INVALID,
+        message: expect.stringContaining('[secondary_model].default_model is required'),
+      },
+    );
+    expect(svc.get('s-force')).toBeUndefined();
+  });
+
+  it('creates a session with a broken pool while the secondary-model experiment is off', async () => {
+    const svc = await build([
+      stubPair(
+        IConfigService,
+        configStub({ secondaryModel: { models: { 'provider/fast': 'fast and cheap' } } }),
+      ),
+      stubPair(IModelCatalog, modelCatalogStub(['provider/fast'])),
+    ]);
+
+    const h = await svc.create({ sessionId: 's-inert', workDir: '/tmp/proj' });
+    expect(svc.get('s-inert')).toBe(h);
+  });
+
+  it('rejects fork with CONFIG_INVALID for a broken pool before copying any files', async () => {
+    const root = await makeTmpRoot();
+    const sections: Record<string, unknown> = {
+      secondaryModel: {
+        defaultModel: 'provider/fast',
+        models: { 'provider/fast': 'fast and cheap' },
+      },
+    };
+    const svc = await build([
+      stubPair(IBootstrapService, tmpBootstrapStub(root)),
+      stubPair(IConfigService, {
+        get: (domain: string) => sections[domain],
+        getAll: () => ({ ...sections }),
+        onDidChangeConfiguration: () => ({ dispose: () => {} }),
+        onDidSectionChange: () => ({ dispose: () => {} }),
+      } as unknown as IConfigService),
+      stubPair(IModelCatalog, modelCatalogStub(['provider/fast'])),
+      stubPair(IFlagService, secondaryModelFlagStub(true)),
+    ]);
+    await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+    const srcDir = join(root, 'sessions', 'wd_stub', 'src');
+    await mkdir(srcDir, { recursive: true });
+    await writeFile(join(srcDir, 'marker'), 'src');
+    sections['secondaryModel'] = { models: { 'provider/fast': 'fast and cheap' } };
+
+    await expect(svc.fork({ sourceSessionId: 'src', newSessionId: 'dst' })).rejects.toMatchObject({
+      code: ErrorCodes.CONFIG_INVALID,
+    });
+    expect(svc.get('dst')).toBeUndefined();
+    await expect(stat(join(root, 'sessions', 'wd_stub', 'dst'))).rejects.toThrow();
   });
 
   it('create appends the session to the shared session_index.jsonl', async () => {
@@ -924,6 +1241,44 @@ describe('SessionLifecycleService', () => {
     expect(archived).toBe(false);
   });
 
+  it('restore re-creates the main agent for a cold empty session, then unarchives', async () => {
+    // The registration itself is non-touching (pinned at the SessionMetadata
+    // level), so restore only needs the plain unarchive write.
+    const calls: string[] = [];
+    const agentHandle = {
+      id: 'main',
+      kind: LifecycleScope.Agent,
+      accessor: {
+        get: () => {
+          throw new Error('unexpected service access');
+        },
+      },
+      dispose: () => {},
+    } as unknown as IAgentScopeHandle;
+    const svc = await build([
+      stubPair(ISessionIndex, sessionIndexWithSummary('s1', '/tmp/proj', 'wd_stub')),
+      stubPair(ISessionMetadata, {
+        ...metadataStub(),
+        setArchived: (value: boolean) => {
+          calls.push(`setArchived:${value}`);
+          return Promise.resolve();
+        },
+      }),
+      stubPair(IAgentLifecycleService, {
+        ...agentLifecycleStub(),
+        create: async () => {
+          calls.push('create');
+          return agentHandle;
+        },
+      }),
+    ]);
+
+    const restored = await svc.restore('s1');
+
+    expect(restored?.id).toBe('s1');
+    expect(calls).toEqual(['create', 'setArchived:false']);
+  });
+
   describe('delete', () => {
     function recordingAppendLogStore(appended: { key: string; record: unknown }[]): IAppendLogStore {
       return {
@@ -1016,7 +1371,7 @@ describe('SessionLifecycleService', () => {
     });
   });
 
-  it('forks successfully even while the source has a busy agent (crash-equivalent copy)', async () => {
+  it('rejects fork of a live source session while a turn is running', async () => {
     const busyAgent = {
       id: MAIN_AGENT_ID,
       kind: LifecycleScope.Agent,
@@ -1045,8 +1400,37 @@ describe('SessionLifecycleService', () => {
 
     await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
 
-    const target = await svc.fork({ sourceSessionId: 'src', newSessionId: 'dst' });
+    await expect(svc.fork({ sourceSessionId: 'src', newSessionId: 'dst' })).rejects.toMatchObject({
+      code: ErrorCodes.SESSION_FORK_ACTIVE_TURN,
+      message: 'Session "src" cannot be forked while a turn is running',
+      details: { sessionId: 'src' },
+    });
+    expect(svc.get('dst')).toBeUndefined();
+  });
+
+  it('forks a closed source session without consulting live activity (crash-equivalent copy)', async () => {
+    const wireStore = wireStoreStub({ 'src/main': threeTurnMainWire() });
+    const created: string[] = [];
+    const svc = await build([
+      stubPair(ISessionIndex, sessionIndexWithSummary('src', '/tmp/proj', 'wd_stub')),
+      stubPair(IAtomicDocumentStore, {
+        ...atomicDocumentStoreStub(),
+        get: (scope: string, key: string) =>
+          Promise.resolve(
+            scope === 'sessions/wd_stub/src' && key === 'state.json'
+              ? { agents: { main: { type: 'main' } } }
+              : undefined,
+          ),
+      } as unknown as IAtomicDocumentStore),
+      stubPair(IAppendLogStore, wireStore.store),
+      stubPair(IAgentLifecycleService, agentLifecycleCreatingStub(created)),
+    ]);
+
+    const target = await svc.fork({ sourceSessionId: 'src', newSessionId: 'dst', turnIndex: 1 });
+
     expect(target.id).toBe('dst');
+    expect(created).toEqual([MAIN_AGENT_ID]);
+    expect(wireStore.rewritten.get('dst/main')).toHaveLength(8);
   });
 
   it('fires onDidCreateSession with the new handle', async () => {
@@ -1504,6 +1888,53 @@ describe('SessionLifecycleService', () => {
   });
 
   describe('fork session state', () => {
+    it('marks the default fork title as replaceable', async () => {
+      const updates: SessionMetaPatch[] = [];
+      const svc = await build([
+        stubPair(ISessionMetadata, {
+          ...metadataStub(),
+          read: () =>
+            Promise.resolve({
+              title: 'generated source',
+              titleKind: 'generated',
+              agents: {},
+            } as never),
+          update: (patch) => {
+            updates.push(patch);
+            return Promise.resolve();
+          },
+        }),
+      ]);
+      await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+
+      await svc.fork({ sourceSessionId: 'src', newSessionId: 'dst' });
+
+      expect(updates).toContainEqual(
+        expect.objectContaining({ title: 'Fork: generated source', titleKind: 'replaceable' }),
+      );
+    });
+
+    it('marks an explicit fork title as custom', async () => {
+      const updates: SessionMetaPatch[] = [];
+      const svc = await build([
+        stubPair(ISessionMetadata, {
+          ...metadataStub(),
+          read: () => Promise.resolve({ title: 'source', agents: {} } as never),
+          update: (patch) => {
+            updates.push(patch);
+            return Promise.resolve();
+          },
+        }),
+      ]);
+      await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+
+      await svc.fork({ sourceSessionId: 'src', newSessionId: 'dst', title: 'user title' });
+
+      expect(updates).toContainEqual(
+        expect.objectContaining({ title: 'user title', titleKind: 'custom' }),
+      );
+    });
+
     it('fork inherits the source session\'s last turn outcome', async () => {
       const updates: { readonly lastTurnReason?: unknown }[] = [];
       const metaStub: ISessionMetadata = {
@@ -1522,6 +1953,96 @@ describe('SessionLifecycleService', () => {
 
       const forkUpdate = updates.find((u) => 'forkedFrom' in u);
       expect(forkUpdate?.lastTurnReason).toBe('failed');
+    });
+
+    it('fork inherits the source session\'s updatedAt (a copy is not fresh activity)', async () => {
+      const updates: { readonly updatedAt?: unknown }[] = [];
+      const metaStub: ISessionMetadata = {
+        ...metadataStub(),
+        read: () =>
+          Promise.resolve({ updatedAt: 9876, agents: {} } as never),
+        update: (patch) => {
+          updates.push(patch);
+          return Promise.resolve();
+        },
+      };
+      const svc = await build([stubPair(ISessionMetadata, metaStub)]);
+
+      await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+      await svc.fork({ sourceSessionId: 'src', newSessionId: 'dst' });
+
+      const forkUpdate = updates.find((u) => 'forkedFrom' in u);
+      expect(forkUpdate?.updatedAt).toBe(9876);
+    });
+
+    it('fork normalizes a legacy ISO-string updatedAt from a cold source to epoch ms', async () => {
+      const updates: { readonly updatedAt?: unknown }[] = [];
+      const metaStub: ISessionMetadata = {
+        ...metadataStub(),
+        // A cold legacy/v1 document read from disk can still carry an ISO
+        // string — the fork must not persist it as the v2 updatedAt.
+        read: () =>
+          Promise.resolve({ updatedAt: '2026-08-10T23:00:00.000Z', agents: {} } as never),
+        update: (patch) => {
+          updates.push(patch);
+          return Promise.resolve();
+        },
+      };
+      const svc = await build([stubPair(ISessionMetadata, metaStub)]);
+
+      await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+      await svc.fork({ sourceSessionId: 'src', newSessionId: 'dst' });
+
+      const forkUpdate = updates.find((u) => 'forkedFrom' in u);
+      expect(forkUpdate?.updatedAt).toBe(Date.parse('2026-08-10T23:00:00.000Z'));
+    });
+
+    it('fork writes the inherited updatedAt AFTER agent registration (registering bumps it)', async () => {
+      const calls: string[] = [];
+      const metaStub: ISessionMetadata = {
+        ...metadataStub(),
+        read: () =>
+          Promise.resolve({
+            updatedAt: 9876,
+            agents: { main: { type: 'main', homedir: '/tmp/h' } },
+          } as never),
+        update: (patch) => {
+          calls.push('forkedFrom' in patch ? 'update:fork' : 'update:other');
+          return Promise.resolve();
+        },
+        registerAgent: () => {
+          calls.push('registerAgent');
+          return Promise.resolve();
+        },
+      };
+      const agentHandle = {
+        id: 'main',
+        kind: LifecycleScope.Agent,
+        accessor: {
+          get: () => {
+            throw new Error('unexpected service access');
+          },
+        },
+        dispose: () => {},
+      } as unknown as IAgentScopeHandle;
+      const svc = await build([
+        stubPair(ISessionMetadata, metaStub),
+        stubPair(IAgentLifecycleService, {
+          ...agentLifecycleStub(),
+          create: async () => {
+            // Mirror the real doCreate: recreation registers the agent, which
+            // is an ordinary metadata write (it bumps updatedAt).
+            await metaStub.registerAgent('main', {});
+            return agentHandle;
+          },
+        }),
+      ]);
+
+      await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+      await svc.fork({ sourceSessionId: 'src', newSessionId: 'dst' });
+
+      expect(calls).toContain('registerAgent');
+      expect(calls.indexOf('update:fork')).toBeGreaterThan(calls.lastIndexOf('registerAgent'));
     });
 
     it('copies blobs, plans, background tasks, and media originals into the fork', async () => {
@@ -1662,6 +2183,212 @@ describe('SessionLifecycleService', () => {
       expect(clone).toMatchObject({ cron: '0 9 * * *', prompt: 'standup', createdAt: 1 });
       expect(clone!.id).not.toBe('task-src');
       expect(cron.docs.get('task-src')!.tags![CRON_SESSION_TAG]).toBe('src');
+    });
+  });
+
+  describe('fork turnIndex truncation', () => {
+    it('slices the main wire at the turn boundary and keeps only matched turn inputs', async () => {
+      const wireStore = wireStoreStub({
+        'src/main': [
+          wireEnvelopeRecord(1),
+          turnPromptRecord('first question', 2),
+          userTurnRecord('first question', 3),
+          assistantMessageRecord('first answer', 4),
+          turnPromptRecord('second question', 5),
+          userTurnRecord('second question', 6),
+          assistantMessageRecord('second answer', 7),
+          turnSteerRecord('a stray steer', 7.1),
+          turnSteerRecord('third question', 7.2),
+          turnPromptRecord('third question', 8),
+          userTurnRecord('third question', 9),
+          assistantMessageRecord('third answer', 10),
+        ],
+      });
+      const updates: Array<Record<string, unknown>> = [];
+      const created: string[] = [];
+      const svc = await build([
+        stubPair(IAppendLogStore, wireStore.store),
+        stubPair(
+          ISessionMetadata,
+          sessionMetadataStubFor(
+            { lastPrompt: 'third question', agents: { main: { type: 'main' } } },
+            updates,
+          ),
+        ),
+        stubPair(IAgentLifecycleService, agentLifecycleCreatingStub(created)),
+      ]);
+      await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+
+      await svc.fork({ sourceSessionId: 'src', newSessionId: 'dst', turnIndex: 1 });
+
+      // Both steers drop: the stray one matches no visible turn, and the one
+      // echoing turn 2's content matches a turn that is itself cut.
+      expect(wireStore.rewritten.get('dst/main')).toEqual([
+        wireEnvelopeRecord(1),
+        turnPromptRecord('first question', 2),
+        userTurnRecord('first question', 3),
+        assistantMessageRecord('first answer', 4),
+        turnPromptRecord('second question', 5),
+        userTurnRecord('second question', 6),
+        assistantMessageRecord('second answer', 7),
+        { type: 'forked', time: expect.any(Number) },
+      ]);
+      expect(created).toEqual([MAIN_AGENT_ID]);
+      // The fork's lastPrompt re-derives from the retained turn instead of
+      // inheriting the source's (turn 2's) value.
+      const forkUpdate = updates.find((patch) => 'forkedFrom' in patch);
+      expect(forkUpdate?.['lastPrompt']).toBe('second question');
+    });
+
+    it('retains the whole wire when turnIndex addresses the last turn', async () => {
+      const wireStore = wireStoreStub({ 'src/main': threeTurnMainWire() });
+      const updates: Array<Record<string, unknown>> = [];
+      const svc = await build([
+        stubPair(IAppendLogStore, wireStore.store),
+        stubPair(
+          ISessionMetadata,
+          sessionMetadataStubFor({ agents: { main: { type: 'main' } } }, updates),
+        ),
+        stubPair(IAgentLifecycleService, agentLifecycleCreatingStub([])),
+      ]);
+      await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+
+      await svc.fork({ sourceSessionId: 'src', newSessionId: 'dst', turnIndex: 2 });
+
+      expect(wireStore.rewritten.get('dst/main')).toEqual([
+        ...threeTurnMainWire(),
+        { type: 'forked', time: expect.any(Number) },
+      ]);
+      const forkUpdate = updates.find((patch) => 'forkedFrom' in patch);
+      expect(forkUpdate?.['lastPrompt']).toBe('third question');
+    });
+
+    it('time-cuts subagent wires at the main cutoff, drops emptied subagents, and prunes copied task state', async () => {
+      const root = await makeTmpRoot();
+      const wireStore = wireStoreStub({
+        'src/main': threeTurnMainWire(),
+        'src/sub_old': [
+          wireEnvelopeRecord(2),
+          userTurnRecord('old sub task', 3),
+          assistantMessageRecord('old sub done', 4),
+        ],
+        'src/sub_new': [wireEnvelopeRecord(8), userTurnRecord('late sub task', 9)],
+      });
+      const created: string[] = [];
+      const svc = await build([
+        stubPair(IBootstrapService, tmpBootstrapStub(root)),
+        stubPair(IAppendLogStore, wireStore.store),
+        stubPair(
+          ISessionMetadata,
+          sessionMetadataStubFor(
+            {
+              agents: {
+                main: { type: 'main' },
+                sub_old: { type: 'sub' },
+                sub_new: { type: 'sub' },
+              },
+            },
+            [],
+          ),
+        ),
+        stubPair(IAgentLifecycleService, agentLifecycleCreatingStub(created)),
+      ]);
+      await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+      const srcDir = join(root, 'sessions', 'wd_stub', 'src');
+      await mkdir(join(srcDir, 'agents', 'main', 'tasks'), { recursive: true });
+      await writeFile(join(srcDir, 'agents', 'main', 'tasks', 't1.json'), '{}');
+      await mkdir(join(srcDir, 'agents', 'main', 'plans'), { recursive: true });
+      await writeFile(join(srcDir, 'agents', 'main', 'plans', 'p1.md'), '# plan');
+      await mkdir(join(srcDir, 'agents', 'sub_old', 'tasks'), { recursive: true });
+      await writeFile(join(srcDir, 'agents', 'sub_old', 'tasks', 't2.json'), '{}');
+      await mkdir(join(srcDir, 'agents', 'sub_new', 'plans'), { recursive: true });
+      await writeFile(join(srcDir, 'agents', 'sub_new', 'plans', 'p2.md'), '# late');
+
+      await svc.fork({ sourceSessionId: 'src', newSessionId: 'dst', turnIndex: 1 });
+
+      // The main cutoff is 7 (turn 1's assistant reply): sub_old survives in
+      // full, while sub_new's only records sit past the cut and it is dropped.
+      expect(created).toEqual([MAIN_AGENT_ID, 'sub_old']);
+      expect(wireStore.rewritten.get('dst/sub_old')).toEqual([
+        wireEnvelopeRecord(2),
+        userTurnRecord('old sub task', 3),
+        assistantMessageRecord('old sub done', 4),
+        { type: 'forked', time: expect.any(Number) },
+      ]);
+      expect(wireStore.rewritten.has('dst/sub_new')).toBe(false);
+      const dstDir = join(root, 'sessions', 'wd_stub', 'dst');
+      await expect(stat(join(dstDir, 'agents', 'sub_new'))).rejects.toThrow();
+      await expect(stat(join(dstDir, 'agents', 'main', 'tasks'))).rejects.toThrow();
+      await expect(stat(join(dstDir, 'agents', 'sub_old', 'tasks'))).rejects.toThrow();
+      await expect(readFile(join(dstDir, 'agents', 'main', 'plans', 'p1.md'), 'utf8')).resolves.toBe(
+        '# plan',
+      );
+    });
+
+    it('does not duplicate cron tasks on a truncated fork', async () => {
+      const cron = cronStoreStub([
+        {
+          id: 'task-src',
+          cron: '0 9 * * *',
+          prompt: 'standup',
+          createdAt: 1,
+          tags: { [CRON_SESSION_TAG]: 'src' },
+        },
+      ]);
+      const svc = await build([
+        stubPair(IAppendLogStore, wireStoreStub({ 'src/main': threeTurnMainWire() }).store),
+        stubPair(
+          ISessionMetadata,
+          sessionMetadataStubFor({ agents: { main: { type: 'main' } } }, []),
+        ),
+        stubPair(IAgentLifecycleService, agentLifecycleCreatingStub([])),
+        stubPair(ICronTaskPersistence, cron),
+      ]);
+      await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+
+      await svc.fork({ sourceSessionId: 'src', newSessionId: 'dst', turnIndex: 1 });
+
+      expect([...cron.docs.values()]).toHaveLength(1);
+    });
+
+    it('rejects an invalid turnIndex with request.invalid and creates nothing', async () => {
+      const svc = await build();
+      await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+
+      for (const turnIndex of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+        await expect(
+          svc.fork({ sourceSessionId: 'src', newSessionId: 'dst', turnIndex }),
+        ).rejects.toMatchObject({
+          code: ErrorCodes.REQUEST_INVALID,
+          message: 'forkSession turnIndex must be a non-negative safe integer',
+          details: { turnIndex },
+        });
+      }
+      expect(svc.get('dst')).toBeUndefined();
+    });
+
+    it('rejects an out-of-range turnIndex with the available turn count and creates nothing', async () => {
+      const root = await makeTmpRoot();
+      const svc = await build([
+        stubPair(IBootstrapService, tmpBootstrapStub(root)),
+        stubPair(IAppendLogStore, wireStoreStub({ 'src/main': threeTurnMainWire() }).store),
+        stubPair(
+          ISessionMetadata,
+          sessionMetadataStubFor({ agents: { main: { type: 'main' } } }, []),
+        ),
+        stubPair(IAgentLifecycleService, agentLifecycleCreatingStub([])),
+      ]);
+      await svc.create({ sessionId: 'src', workDir: '/tmp/proj' });
+
+      await expect(
+        svc.fork({ sourceSessionId: 'src', newSessionId: 'dst', turnIndex: 5 }),
+      ).rejects.toMatchObject({
+        code: ErrorCodes.REQUEST_INVALID,
+        message: 'Turn 5 was not found in session "src"',
+        details: { turnIndex: 5, availableTurns: 3 },
+      });
+      expect(svc.get('dst')).toBeUndefined();
+      await expect(stat(join(root, 'sessions', 'wd_stub', 'dst'))).rejects.toThrow();
     });
   });
 

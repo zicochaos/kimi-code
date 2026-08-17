@@ -64,7 +64,7 @@ export class StubConfigService implements IConfigService {
 
   replace(domain: string, value: unknown, _target?: ConfigTarget): Promise<void> {
     const previousValue = this._values.get(domain);
-    if (value === undefined) {
+    if (value === undefined || value === null) {
       this._values.delete(domain);
     } else {
       this._values.set(domain, value);
@@ -76,7 +76,7 @@ export class StubConfigService implements IConfigService {
   replaceSections(sections: Readonly<Record<string, unknown>>): Promise<void> {
     for (const [domain, value] of Object.entries(sections)) {
       const previousValue = this._values.get(domain);
-      if (value === undefined) {
+      if (value === undefined || value === null) {
         this._values.delete(domain);
       } else {
         this._values.set(domain, value);

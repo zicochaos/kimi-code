@@ -600,8 +600,7 @@ export class SubAgentEventHandler {
       // The bound model alias rides every child status update (emitted right
       // after spawn). Swarm members share one binding, so the panel shows it
       // once in the header instead of per cell. `modelDisplayName` falls back
-      // to the alias itself when the entry is unknown (e.g. the synthesized
-      // `__secondary__` derived entry is missing).
+      // to the alias itself when the entry is unknown.
       progress.setModelDisplay(
         modelDisplayName(event.model, this.host.state.appState.availableModels[event.model]),
       );
@@ -673,8 +672,11 @@ export class SubAgentEventHandler {
     }
 
     const width = Math.floor(terminalColumns);
+    const dock = state.dockContainer;
+    // Fullscreen: the root children are empty (layout root holds a ScrollView +
+    // dock); the chrome below the transcript is the dock's children instead.
     const rowsAfterSwarm = renderedRowsAfterChild(
-      state.ui.children,
+      dock !== undefined ? [state.transcriptContainer, ...dock.children] : state.ui.children,
       state.transcriptContainer,
       width,
     );

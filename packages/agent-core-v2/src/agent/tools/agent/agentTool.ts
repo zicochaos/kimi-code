@@ -10,9 +10,18 @@
  * under TaskList/TaskOutput/TaskStop when `run_in_background=true` or after
  * detach), and terminal text formatting.
  *
- * Spawn bindings use an explicit tool choice first, then the target profile's
- * symbolic model preference, before `resolveSubagentBinding` falls back to the
- * configured secondary model or the caller's model. The selected alias is
+ * Spawn bindings use the explicit tool `model` choice first, before
+ * `resolveSubagentBinding` falls back to the configured `[secondary_model.models]`
+ * pool default or the caller's model; with `[secondary_model].force` set the
+ * `model` parameter is not advertised and every spawn binds `default_model`.
+ * The pool is gated behind the `secondary-model` experiment (via
+ * `IFlagService`): while it is off the `model` parameter is stripped and
+ * every spawn inherits the caller's model. The experimental
+ * `subagent-model-selection` flag layers on top: the `model` parameter then
+ * also accepts any exact configured alias from the whole model directory
+ * (advertised via `formatSubagentModelDirectory`, preflighted against
+ * `IModelService` + `IModelCatalog`, and bound directly without pool
+ * membership). The selected alias is
  * resolved through the model catalog before lifecycle allocation. A resumed
  * agent keeps the model recorded in its own wire journal — with per-subagent
  * models there is no "child follows the parent's current model" invariant to
@@ -21,9 +30,10 @@
  * Registered via the module-level `registerAgentToolService(ISubagentTool,
  * SubagentTool)` at the bottom of this file — the same "import = register"
  * pattern used by every agent tool. The per-profile tool listings in the
- * description read the full contribution table (not the runtime registry,
- * which only holds tools the caller's own Profile activated), plus any
- * dynamically registered tools. The description's catalog profile list is
+ * description read the full `AgentToolContribution` collection — static
+ * registrations and feature-contributed tools alike — not the runtime
+ * registry, which only holds tools the caller's own Profile activated,
+ * plus any dynamically registered tools. The description's catalog profile list is
  * snapshotted once the session catalog has loaded and frozen for the agent's
  * lifetime: plugin install / enable / disable / remove re-contributes
  * profiles mid-session, and a live read would rewrite the tools payload of
@@ -32,6 +42,7 @@
  * Bound at Agent scope.
  */
 
+import { type CollectionView } from '#/_base/di/collection';
 import type { IAgentScopeHandle } from '#/_base/di/scope';
 import {
   isAbortError,
@@ -62,7 +73,7 @@ import {
   type ToolExecution,
 } from '#/tool/toolContract';
 import {
-  getAgentToolContributions,
+  AgentToolContribution,
   registerAgentToolService,
 } from '#/agent/toolRegistry/toolContribution';
 import { IAgentToolRegistryService, type ToolReference } from '#/agent/toolRegistry/toolRegistry';
@@ -81,7 +92,6 @@ import { IModelService } from '#/kosong/model/model';
 import {
   formatSubagentModelDirectory,
   isSelectableSubagentModelAlias,
-  isSubagentModelChoiceToken,
   normalizeSubagentModelAlias,
   parametersWithSubagentModelSelection,
   resolvedSubagentModelDirectory,
@@ -99,15 +109,14 @@ import { emitAgentRunSpawned, mirrorAgentRun } from '#/session/subagent/mirrorAg
 import { ISessionSubagentService } from '#/session/subagent/subagent';
 import {
   buildSubagentModelDescriptions,
+  exposesSubagentModelChoice,
   formatSubagentTimeoutDescription,
+  PRIMARY_SUBAGENT_MODEL_CHOICE,
   resolveSubagentBinding,
   resolveSubagentTimeoutMs,
   stripSubagentModelParameter,
-  subagentDisplayModel,
   wrapSubagentModelError,
-  type SubagentModelChoice,
 } from '#/session/subagent/configSection';
-import { SECONDARY_MODEL_FLAG_ID } from '#/session/subagent/flag';
 import {
   BACKGROUND_AGENT_UNAVAILABLE,
   DEFAULT_PROFILE_NAME,
@@ -133,22 +142,18 @@ export class SubagentTool implements ISubagentTool {
   readonly name: string = 'Agent';
 
   /**
-   * The `model` choice only exists while secondary-model or exact model
-   * selection is enabled; otherwise the advertised schema drops it so the
-   * concept never enters the prompt. Read live per request (same as
-   * `description`).
+   * The `model` choice only exists while the subagent model pool is exposed
+   * or exact model selection is enabled; otherwise the advertised schema
+   * drops it so the concept never enters the prompt. Read live per request
+   * (same as `description`).
    */
   get parameters(): Record<string, unknown> {
-    if (
-      !this.flags.enabled(SECONDARY_MODEL_FLAG_ID) &&
-      !this.flags.enabled(SUBAGENT_MODEL_SELECTION_FLAG_ID)
-    ) {
-      return SUBAGENT_TOOL_PARAMETERS_NO_MODEL;
+    if (this.exactModelSelectionEnabled()) {
+      return parametersWithSubagentModelSelection(SUBAGENT_TOOL_PARAMETERS, true);
     }
-    return parametersWithSubagentModelSelection(
-      SUBAGENT_TOOL_PARAMETERS,
-      this.exactModelSelectionEnabled(),
-    );
+    return exposesSubagentModelChoice(this.config, this.flags)
+      ? SUBAGENT_TOOL_PARAMETERS
+      : SUBAGENT_TOOL_PARAMETERS_NO_MODEL;
   }
 
   private readonly callerAgentId: string;
@@ -174,6 +179,7 @@ export class SubagentTool implements ISubagentTool {
     @IFlagService private readonly flags: IFlagService,
     @IModelService private readonly models: IModelService,
     @IModelCatalog private readonly modelCatalog: IModelCatalog,
+    @AgentToolContribution private readonly contributions: CollectionView<AgentToolContribution>,
   ) {
     this.callerAgentId = scopeContext.agentId;
     this.canRunInBackground = () =>
@@ -201,7 +207,6 @@ export class SubagentTool implements ISubagentTool {
       this.knownToolReferences(),
       (profile, name, source) =>
         this.toolPolicy.isToolActiveForProfile(profile, name, source),
-      this.flags.enabled(SECONDARY_MODEL_FLAG_ID),
     );
     if (typeLines) {
       description += `\n\nAvailable agent types (pass via subagent_type):\n${typeLines}`;
@@ -210,7 +215,6 @@ export class SubagentTool implements ISubagentTool {
       this.config,
       this.flags,
       this.profile.data().modelAlias,
-      this.modelCatalog,
     );
     if (modelLines !== undefined) {
       description += `\n\n${modelLines}`;
@@ -232,7 +236,7 @@ export class SubagentTool implements ISubagentTool {
 
   private knownToolReferences(): ToolReference[] {
     const refs = new Map<string, ToolReference>();
-    for (const contribution of getAgentToolContributions()) {
+    for (const contribution of this.contributions.items) {
       refs.set(contribution.options.name, {
         name: contribution.options.name,
         source: contribution.options.source ?? 'builtin',
@@ -299,12 +303,11 @@ export class SubagentTool implements ISubagentTool {
   private preflightRequestedModel(
     requested: string,
   ): { readonly displayModel?: string; readonly error?: string } {
-    if (isSubagentModelChoiceToken(requested)) return { displayModel: requested };
+    if (requested === PRIMARY_SUBAGENT_MODEL_CHOICE) return { displayModel: requested };
     if (!this.exactModelSelectionEnabled()) {
-      return {
-        error:
-          'Subagent model selection is disabled. Enable the subagent-model-selection experimental feature to use exact model aliases, or pass "primary"/"secondary".',
-      };
+      // Pool aliases are validated by resolveSubagentBinding at spawn time,
+      // which reports the available choices on a miss.
+      return { displayModel: requested };
     }
     try {
       const modelAlias = normalizeSubagentModelAlias(requested);
@@ -327,17 +330,15 @@ export class SubagentTool implements ISubagentTool {
   private resolveSpawnBinding(
     own: { modelAlias: string; thinkingLevel: string },
     requested: string | undefined,
-    profilePreference: SubagentModelChoice | undefined,
-  ): { model: string; thinking?: string; displayModel: string } {
-    if (requested !== undefined && !isSubagentModelChoiceToken(requested)) {
-      return { model: requested, displayModel: requested };
+  ): { model: string; thinking?: string } {
+    if (
+      requested !== undefined &&
+      requested !== PRIMARY_SUBAGENT_MODEL_CHOICE &&
+      this.exactModelSelectionEnabled()
+    ) {
+      return { model: requested };
     }
-    return resolveSubagentBinding(
-      this.config,
-      this.flags,
-      own,
-      (requested as SubagentModelChoice | undefined) ?? profilePreference,
-    );
+    return resolveSubagentBinding(this.config, this.flags, own, requested);
   }
 
   private resumeProfileName(agentId: string): string | undefined {
@@ -378,10 +379,7 @@ export class SubagentTool implements ISubagentTool {
       agentId = target.id;
       const resumed = target.accessor.get(IAgentProfileService).data();
       profileName = resumed.profileName ?? RESUMED_LABEL;
-      displayModel =
-        resumed.modelAlias === undefined
-          ? undefined
-          : subagentDisplayModel(this.config, resumed.modelAlias);
+      displayModel = resumed.modelAlias;
     } else {
       const requestedProfileName = args.subagent_type?.length
         ? args.subagent_type
@@ -416,7 +414,6 @@ export class SubagentTool implements ISubagentTool {
       const binding = this.resolveSpawnBinding(
         { modelAlias: own.modelAlias, thinkingLevel: own.thinkingLevel },
         args.model,
-        profile.modelPreference,
       );
       let created: IAgentScopeHandle;
       try {
@@ -438,7 +435,7 @@ export class SubagentTool implements ISubagentTool {
         .inheritUserTools(requester.accessor.get(IAgentUserToolService));
       agentId = created.id;
       profileName = profile.name;
-      displayModel = binding.displayModel;
+      displayModel = binding.model;
       promptText = await applyProfilePromptPrefix(profile, args.prompt, {
         cwd: this.workspace.workDir,
         runner: this.processRunner,
@@ -471,6 +468,7 @@ export class SubagentTool implements ISubagentTool {
     return {
       agentId,
       profileName,
+      parentToolCallId: toolCallId,
       model: displayModel,
       thinkingEffort: this.lifecycle
         .get(agentId)
@@ -634,7 +632,6 @@ function buildProfileDescriptions(
     name: string,
     source: ToolReference['source'],
   ) => boolean,
-  showModelPreferences: boolean,
 ): string {
   return profiles
     .map((profile) => {
@@ -642,10 +639,6 @@ function buildProfileDescriptions(
         (part): part is string => part !== undefined && part.length > 0,
       );
       const header = details.length === 0 ? `- ${profile.name}` : `- ${profile.name}: ${details.join(' ')}`;
-      const headerLines =
-        !showModelPreferences || profile.modelPreference === undefined
-          ? header
-          : `${header}\n  Model preference: ${profile.modelPreference}`;
       const activeTools = resolveActiveToolNames(profile);
       const externallyRestricted = tools.some(
         (tool) =>
@@ -657,20 +650,20 @@ function buildProfileDescriptions(
           .filter((tool) => isToolActive(profile, tool.name, tool.source))
           .map((tool) => tool.name);
         if (effectiveTools.length === 0) {
-          return `${headerLines}\n  Tools: none`;
+          return `${header}\n  Tools: none`;
         }
-        return `${headerLines}\n  Tools: ${effectiveTools.join(', ')}`;
+        return `${header}\n  Tools: ${effectiveTools.join(', ')}`;
       }
       if (activeTools === undefined) {
         if ((profile.disallowedTools?.length ?? 0) > 0) {
-          return `${headerLines}\n  Tools: all except ${profile.disallowedTools!.join(', ')}`;
+          return `${header}\n  Tools: all except ${profile.disallowedTools!.join(', ')}`;
         }
-        return `${headerLines}\n  Tools: all`;
+        return `${header}\n  Tools: all`;
       }
       if (activeTools.length === 0) {
-        return `${headerLines}\n  Tools: none`;
+        return `${header}\n  Tools: none`;
       }
-      return `${headerLines}\n  Tools: ${activeTools.join(', ')}`;
+      return `${header}\n  Tools: ${activeTools.join(', ')}`;
     })
     .join('\n');
 }

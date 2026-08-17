@@ -32,8 +32,8 @@ import {
   MODELS_SECTION,
   PERSIST_DEFAULT_MODEL_SECTION,
   PROVIDERS_SECTION,
-  SECONDARY_MODEL_SECTION,
 } from '#/app/kosongConfig/configSection';
+import { SECONDARY_MODEL_SECTION } from '#/session/subagent/configSection';
 import { type ModelRecord } from '#/kosong/model/model';
 import { ModelService } from '#/kosong/model/modelService';
 import { type ProviderConfig } from '#/kosong/provider/provider';
