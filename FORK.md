@@ -2,12 +2,12 @@
 
 This file tracks **what diverges from upstream** (`MoonshotAI/kimi-code`) so rebases do not drop local product behavior. Update it whenever a fork-only feature is added, restored, or abandoned.
 
-**Upstream base we track:** `@moonshot-ai/kimi-code@0.35.0` (release 2026-08-12; remote `upstream` = `MoonshotAI/kimi-code`, `origin` = this fork `zicochaos/kimi-code`)
-**Local main tip:** see `git log main` (0.35.0 port lives on merge branch `merge/upstream-0.35.0` until integrated)
+**Upstream base we track:** `@moonshot-ai/kimi-code@0.36.1` (release 2026-08-14; remote `origin` = `MoonshotAI/kimi-code`, `fork` = this fork `zicochaos/kimi-code`)
+**Local main tip:** see `git log main` (0.36.1 port lives on merge branch `merge/upstream-0.36.1` until integrated)
 
 ## How to merge a new upstream without losing options
 
-1. `git fetch upstream --tags`
+1. `git fetch origin --tags`
 2. Backup: `git tag backup/pre-<ver>-port main`
 3. Create a merge branch (`git switch -c merge/upstream-<ver> main`) and merge the upstream tag; do not rebase the merge-heavy fork history.
 4. Prefer upstream implementations where they provide the same or better behavior, then restore only the missing contracts listed below.
@@ -32,7 +32,7 @@ rg -n "disabled_skills|persist_default_model|agents_md_expand_includes|formatTer
 | `persist_default_model` | `true` | When `false`, model changes stay process-local and do not rewrite managed `config.toml` model settings | **v2 only since the 0.33.0 port:** `packages/agent-core-v2/src/app/kosongConfig/configSection.ts`, `packages/agent-core-v2/src/app/kosongConfig/kosongConfigService.ts` |
 | `agents_md_expand_includes` | `false` | When `true`, standalone `@path` lines in `AGENTS.md` are expanded at system-prompt assembly time (depth ≤ 5; missing/cycle/empty → HTML comments) | **v2 only since the 0.33.0 port:** agent-core-v2 profile context loader + `agentsMdExpandIncludes` config section |
 
-### Engine posture (0.33.0 / 0.34.0 / 0.35.0)
+### Engine posture (0.33.0 / 0.34.0 / 0.35.0 / 0.36.x)
 
 Upstream `0.33.0` (`#2627`) makes **agent-core-v2 the default engine** for every CLI surface; v1 (`packages/agent-core`) is legacy behind `KIMI_CODE_LEGACY_FLAG=1` and receives maintenance fixes only. The 0.33.0 port therefore **dropped all v1-side fork features** (v1 `disabled_skills`, v1 `persist_default_model`, v1 include expansion, retired v1 exact-alias selection). The single v1-side keep is the wire-protocol 1.5 migration (`packages/agent-core/src/agent/records/migration/v1.5.ts`) so the legacy engine can still resume sessions written by v2 — upstream v1 remains at 1.4.
 
@@ -42,17 +42,19 @@ Upstream `0.34.0` highlights absorbed by this port: cache-expiry hint dialog, Wi
 
 Upstream `0.35.0` highlights absorbed by this port: live background subagent activity in `/tasks` (`#2816`), paginated `/sessions` picker + SDK `listSessionsPage` (`#2826`), step-retry progress indicator (`#2825`), full-text search index isolated into a worker host (`#2701`; `search_worker` default ON, `persistence_minidb_readmodel` flipped to default ON), WebSocket heartbeat for proxy idle timeouts (`#2813`), global MCP auth status in the SDK (`#2706`/`#2731`), `btw`/`debugEvents` Feature units, and a prebuilt `dist-web` sync (`#2840`). `#2837` removes `Agent`/`AgentSwarm` from the builtin coder profile on both engines — the default coder can no longer spawn nested subagents unless a custom profile lists the tools; the fork's `subagent-model-selection` is unaffected (the tools, schemas, and exact-alias plumbing remain) but is reachable only from profiles that expose them. The port's single merge conflict was `apps/kimi-code/src/tui/kimi-tui.ts` (upstream `#2816`/`#2826` rework), resolved by keeping upstream's structure and re-applying `formatTerminalTitle` + the managed-quota refresh hooks. The port also deleted the orphaned `apps/kimi-web` leftovers (`QuotaCard.vue`, `managedQuota.ts`, `managedQuota.test.ts`).
 
+Upstream `0.36.0`/`0.36.1` highlights absorbed by this port: `#2700` replaces the old v2 secondary-model recipe with a declarative **subagent model pool** — `[secondary_model] default_model` + `[secondary_model.models]` alias→description table, gated behind the same `secondary-model` experiment, with pool validation at session start, `force` mode, and the `Agent`/`AgentSwarm` `model` parameter accepting pool aliases or `primary`. The `secondaryModel` config section moved from `app/kosongConfig/configSection.ts` to `session/subagent/configSection.ts`, the secondary-model overlay/derived-entry machinery is gone, and the v2 agent-profile `modelPreference` / `model_preference` frontmatter field was dropped (the pool supersedes it). The swarm tool moved under `src/features/swarm/`. Also absorbed: the `#2843` SDK contract change (`applyPersistedSecondaryModel` is gone; `/secondary-model` persists `default_model` via config) and the fullscreen TUI experiment (`KIMI_CODE_TUI_FULL_SCREEN`). The fork's `subagent-model-selection` now **composes with the pool**: the `model` parameter is advertised when the pool is exposed OR the fork flag is on; pool aliases resolve through upstream's `resolveSubagentBinding`, while exact configured aliases (fork flag on, preflighted against the whole model directory) bind directly without pool membership. The fork's `profile.modelPreference` spawn fallback died with the upstream field removal.
+
 ### Experimental
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `subagent-model-selection` | `false` | **v2 engine only.** Optional exact configured/materializable model aliases on `Agent` and `AgentSwarm`, composed with upstream `primary`/`secondary` when secondary-model is enabled. Env: `KIMI_CODE_EXPERIMENTAL_SUBAGENT_MODEL_SELECTION`. The v1-side implementation was retired: upstream `#2232` shipped secondary-model binding + custom agent files on v1 (TUI included), so the default v1 engine now offers upstream's `primary`/`secondary` choices only |
+| `subagent-model-selection` | `false` | **v2 engine only.** Optional exact configured/materializable model aliases on `Agent` and `AgentSwarm`, composed with the upstream `[secondary_model]` subagent model pool since 0.36.x (pool aliases resolve via `resolveSubagentBinding`; exact aliases bind directly, no pool membership needed). Env: `KIMI_CODE_EXPERIMENTAL_SUBAGENT_MODEL_SELECTION`. The v1-side implementation was retired: upstream `#2232` shipped secondary-model binding + custom agent files on v1 (TUI included), so the default v1 engine now offers upstream's `primary`/`secondary` choices only |
 
 ### Upstream foundation (already on main@origin)
 
 | Feature | Notes |
 | --- | --- |
-| `#2064` secondary model | Configurable `[secondary_model]`, `primary`/`secondary` tool choices, secondary overlay, startup warning. Keep intact; fork exact-alias selection (v2-only) sits on top. |
+| `#2064` secondary model | Configurable `[secondary_model]`, `primary`/`secondary` tool choices, secondary overlay, startup warning. On v2, 0.36.x (`#2700`) turned this into the declarative subagent model pool (`default_model` + `[secondary_model.models]`, section now in `session/subagent/configSection.ts`); the overlay/derived-entry machinery and the v2 `modelPreference` profile field are gone. Keep intact; fork exact-alias selection (v2-only) sits on top. |
 | `#2232` v1 secondary model + agent files | Custom agent files (user/project/extra/explicit dirs), `--agent`/`--agent-file` in TUI and `kimi -p`, `[secondary_model]` + `KIMI_SECONDARY_MODEL` binding for spawned subagents behind `KIMI_CODE_EXPERIMENTAL_SECONDARY_MODEL`, `/secondary_model` TUI command, `disallowedTools` deny semantics. Supersedes the fork's retired v1 exact-alias selection. |
 
 ### TUI / protocol
@@ -111,11 +113,11 @@ Then `kimi -c` can continue the previous healthy session for that workdir.
 
 ### Secondary model vs exact-alias selection
 
-- Upstream `secondary-model` (now including `#2232`'s v1 port) is the foundation for `primary`/`secondary` and `[secondary_model]` on both engines.
+- Upstream `secondary-model` (now including `#2232`'s v1 port) is the foundation for `primary`/`secondary` and `[secondary_model]` on both engines; on v2, 0.36.x (`#2700`) reshaped it into the subagent model pool (`default_model` + `[secondary_model.models]`, pool-alias `model` choices plus the symbolic `primary`).
 - Fork `subagent-model-selection` adds exact aliases under a separate experimental flag (default off) — **v2 engine only**; the v1 implementation was dropped in favor of upstream's.
 - Permission matching uses the semantic profile name; display labels may include the model for clarity.
 - Resume model semantics differ by engine: v1 realigns the child to the parent model alias (tool-call `model` is ignored); v2 keeps the journal-bound model and does not rebind from parent tool args.
-- Known limitations left open: legacy model directory still reserves the tokens `primary` / `secondary` (M-3), and the subagent model directory does not live-reload after config changes without a new session or equivalent restart (M-4).
+- Known limitations left open: the model directory still reserves the tokens `primary` / `secondary` (M-3 — on v2 `secondary` is no longer a bindable choice since the pool replaced it), and the subagent model directory does not live-reload after config changes without a new session or equivalent restart (M-4).
 
 ### A port dropped a feature
 
@@ -126,9 +128,11 @@ If something disappears after syncing upstream, compare against `backup/pre-*` a
 | Branch | Meaning |
 | --- | --- |
 | `main` | Shipping fork tip |
-| `merge/upstream-0.35.0` | 0.35.0 port (merge of tag `@moonshot-ai/kimi-code@0.35.0`); integrate into `main` after verification |
+| `merge/upstream-0.36.1` | 0.36.1 port (merge of tag `@moonshot-ai/kimi-code@0.36.1`); integrate into `main` after verification |
+| `merge/upstream-0.35.0` | 0.35.0 port (integrated) |
 | `merge/upstream-0.34.0` | 0.34.0 port (integrated) |
 | `merge/upstream-0.33.0` | 0.33.0 port (integrated) |
+| `backup/pre-0.36.1-port` (tag) | Pre-port local tip at `083c4eba8` (last state on upstream 0.35.0) |
 | `backup/pre-0.35.0-port` (tag) | Pre-port local tip at `bc2350063` (last state on upstream 0.34.0) |
 | `backup/pre-0.34.0-port` (tag) | Pre-port local tip at `a1054918b` (last state on upstream 0.33.0) |
 | `backup/pre-jj-migration` (tag) | Same tip — snapshot from the jj→git migration on 2026-08-07. The `.jj` store was archived out of the repo; this repo is now plain git |
